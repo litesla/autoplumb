@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "A product available in the shop",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Product name" },
+        "price": { "type": "number", "description": "Product price" },
+        "category": { "type": "string", "description": "Product category" },
+        "description": { "type": "string", "description": "Product description" },
+        "image": { "type": "string", "description": "Product image URL" },
+        "stock": { "type": "integer", "description": "Available stock" },
+        "type": { "type": "string", "enum": ["auto", "plumbing"], "description": "Shop mode" },
+        "brand": { "type": "string", "description": "Product brand" },
+        "specs": { "type": "string", "description": "JSON string of specifications" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "price", "type"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "A customer order",
+      "type": "object",
+      "properties": {
+        "user_id": { "type": "string", "description": "UID of the customer" },
+        "items": { "type": "string", "description": "JSON string of ordered items" },
+        "total_price": { "type": "number", "description": "Total order price" },
+        "phone": { "type": "string", "description": "Customer phone number" },
+        "delivery_address": { "type": "string", "description": "Delivery address" },
+        "status": { "type": "string", "enum": ["pending", "processing", "shipped", "delivered", "cancelled"], "description": "Order status" },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "required": ["items", "total_price", "phone", "delivery_address"]
+    },
+    "Review": {
+      "title": "Review",
+      "description": "A product review",
+      "type": "object",
+      "properties": {
+        "productId": { "type": "string", "description": "ID of the product" },
+        "userId": { "type": "string", "description": "UID of the reviewer" },
+        "userName": { "type": "string", "description": "Name of the reviewer" },
+        "rating": { "type": "number", "description": "Rating from 1 to 5" },
+        "comment": { "type": "string", "description": "Review comment" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["productId", "userId", "rating", "comment"]
+    },
+    "BlogPost": {
+      "title": "BlogPost",
+      "description": "A blog article",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string", "description": "Article title" },
+        "excerpt": { "type": "string", "description": "Short summary" },
+        "content": { "type": "string", "description": "Full article content" },
+        "author": { "type": "string", "description": "Author name" },
+        "category": { "type": "string", "description": "Article category" },
+        "image": { "type": "string", "description": "Cover image URL" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "readTime": { "type": "string", "description": "Estimated read time" }
+      },
+      "required": ["title", "content", "author"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Extended user profile information",
+      "type": "object",
+      "properties": {
+        "fullName": { "type": "string", "description": "User's full name" },
+        "phone": { "type": "string", "description": "User's phone number" },
+        "address": { "type": "string", "description": "User's primary address" },
+        "savedAddresses": { "type": "array", "items": { "type": "string" }, "description": "List of saved addresses" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "Global application configuration",
+      "type": "object",
+      "properties": {
+        "maintenanceMode": { "type": "boolean", "description": "Whether the app is in maintenance mode" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/products": {
+      "schema": "Product",
+      "description": "Collection of all products"
+    },
+    "/orders": {
+      "schema": "Order",
+      "description": "Collection of all orders"
+    },
+    "/reviews": {
+      "schema": "Review",
+      "description": "Collection of all product reviews"
+    },
+    "/blog": {
+      "schema": "BlogPost",
+      "description": "Collection of blog articles"
+    },
+    "/user_profiles": {
+      "schema": "UserProfile",
+      "description": "Collection of extended user profiles"
+    },
+    "/content/settings": {
+      "schema": "AppSettings",
+      "description": "Global system settings"
+    }
+  }
+}

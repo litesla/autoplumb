@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AutoPlumb — Автотовари та Сантехніка в Україні</title>
+    <meta name="description" content="Найкращий вибір автотоварів та сантехніки в Україні. Швидка доставка, гарантія якості та професійна підтримка." />
+    <meta name="keywords" content="автотовари, сантехніка, купити автотовари, купити сантехніку, Україна, Нова Пошта" />
+    <script>
+      // Ultimate suppression for Talisman/MetaMask extension errors and UI
+      (function() {
+        const suppressPattern = /Talisman extension|onboarding|configured yet|MetaMask|Failed to connect to MetaMask|web3|ethereum/i;
+        
+        // 1. CSS Injection (Immediate & Persistent)
+        const injectStyles = () => {
+          const style = document.createElement('style');
+          style.id = 'suppress-crypto-styles';
+          style.textContent = `
+            [id*="talisman"], [class*="talisman"], [id*="Talisman"], [class*="Talisman"],
+            [id*="metamask"], [class*="metamask"], [id*="MetaMask"], [class*="MetaMask"],
+            [id*="ethereum"], [class*="ethereum"], [id*="web3"], [class*="web3"],
+            iframe[src*="talisman"], div[style*="talisman"],
+            iframe[src*="metamask"], div[style*="metamask"],
+            .talisman-onboarding, #talisman-onboarding,
+            .metamask-onboarding, #metamask-onboarding,
+            [data-talisman], [talisman-extension],
+            [data-metamask], [metamask-extension] {
+              display: none !important;
+              visibility: hidden !important;
+              opacity: 0 !important;
+              pointer-events: none !important;
+              z-index: -9999 !important;
+              position: absolute !important;
+              left: -9999px !important;
+              height: 0 !important;
+              width: 0 !important;
+            }
+          `;
+          if (!document.getElementById('suppress-crypto-styles')) {
+            (document.head || document.documentElement).appendChild(style);
+          }
+        };
+        injectStyles();
+        setInterval(injectStyles, 1000);
+
+        // 2. Neutralize window objects with a silent proxy (if they don't exist yet)
+        const silentHandler = {
+          get: (target, prop) => {
+            if (prop === 'isMetaMask' || prop === 'isTalisman') return true;
+            if (prop === 'on' || prop === 'removeListener') return () => {};
+            if (prop === 'request' || prop === 'send' || prop === 'sendAsync' || prop === 'enable') {
+              return () => Promise.resolve([]);
+            }
+            if (prop === 'selectedAddress') return null;
+            if (prop === 'networkVersion') return '1';
+            if (prop === 'chainId') return '0x1';
+            return undefined;
+          }
+        };
+        const silentProxy = new Proxy({}, silentHandler);
+
+        const neutralize = (name) => {
+          try {
+            if (window[name]) return; // Don't touch if already exists
+            
+            Object.defineProperty(window, name, {
+              get: () => silentProxy,
+              set: () => {},
+              configurable: true // Keep it configurable to avoid redefinition errors
+            });
+          } catch (e) {}
+        };
+        ['talisman', 'metamask', 'ethereum', 'web3', 'BinanceChain', 'trustwallet'].forEach(neutralize);
+        
+        // 3. Robust Console Override
+        const wrapConsole = (method) => {
+          const original = console[method];
+          try {
+            const descriptor = Object.getOwnPropertyDescriptor(console, method);
+            if (descriptor && !descriptor.configurable) {
+              return;
+            }
+            Object.defineProperty(console, method, {
+              configurable: false,
+              writable: false,
+              value: function(...args) {
+                try {
+                  const str = args.join(' ');
+                  if (suppressPattern.test(str)) return;
+                } catch (e) {}
+                return original.apply(console, args);
+              }
+            });
+          } catch (e) {}
+        };
+        ['log', 'warn', 'error', 'info', 'debug', 'trace'].forEach(wrapConsole);
+
+        // 4. Global Error Handlers
+        window.addEventListener('error', (e) => {
+          if (e.message && suppressPattern.test(e.message)) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+
+        window.addEventListener('unhandledrejection', (e) => {
+          const reason = e.reason ? (e.reason.message || e.reason).toString() : '';
+          if (suppressPattern.test(reason)) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        }, true);
+
+        // 5. Intercept postMessage communication
+        window.addEventListener('message', (e) => {
+          try {
+            const dataStr = typeof e.data === 'string' ? e.data : JSON.stringify(e.data);
+            if (suppressPattern.test(dataStr)) {
+              e.stopImmediatePropagation();
+            }
+          } catch (err) {}
+        }, true);
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+

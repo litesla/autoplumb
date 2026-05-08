@@ -1,0 +1,172 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: products
+    // Document ID: auto-generated
+    // Fields:
+    //   - name: string (required)
+    //   - price: number (required)
+    //   - category: string
+    //   - description: string
+    //   - image: string
+    //   - stock: number
+    //   - type: string (required, 'auto' | 'plumbing')
+    //   - brand: string
+    //   - specs: string (JSON)
+    //   - created_at: timestamp
+    //
+    // Collection: orders
+    // Document ID: auto-generated
+    // Fields:
+    //   - user_id: string
+    //   - items: string (JSON, required)
+    //   - total_price: number (required)
+    //   - phone: string (required)
+    //   - delivery_address: string (required)
+    //   - status: string
+    //   - created_at: timestamp
+    //
+    // Collection: reviews
+    // Document ID: auto-generated
+    // Fields:
+    //   - productId: string (required)
+    //   - userId: string (required)
+    //   - userName: string
+    //   - rating: number (required, 1-5)
+    //   - comment: string (required)
+    //   - createdAt: timestamp
+    //
+    // Collection: blog
+    // Document ID: auto-generated
+    // Fields:
+    //   - title: string (required)
+    //   - excerpt: string
+    //   - content: string (required)
+    //   - author: string (required)
+    //   - category: string
+    //   - image: string
+    //   - createdAt: timestamp
+    //   - readTime: string
+    //
+    // Collection: user_profiles
+    // Document ID: user UID
+    // Fields:
+    //   - fullName: string
+    //   - phone: string
+    //   - address: string
+    //   - savedAddresses: list
+    //   - updatedAt: timestamp
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+         (request.auth.token.email == "vajopyrto@gmail.com" && request.auth.token.email_verified == true) ||
+         (request.auth.token.email == "pusistije@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidProduct(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() < 200 &&
+             data.price is number && data.price >= 0 &&
+             data.type in ['auto', 'plumbing'] &&
+             (!('brand' in data) || (data.brand is string && data.brand.size() < 100)) &&
+             (!('category' in data) || (data.category is string && data.category.size() < 100));
+    }
+
+    function isValidOrder(data) {
+      return data.items is string && data.items.size() > 0 && data.items.size() < 10000 &&
+             data.total_price is number && data.total_price >= 0 &&
+             data.phone is string && data.phone.size() >= 10 && data.phone.size() <= 20 &&
+             data.delivery_address is string && data.delivery_address.size() > 0 && data.delivery_address.size() < 1000;
+    }
+
+    function isValidReview(data) {
+      return data.productId is string && data.productId.size() > 0 &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.rating is number && data.rating >= 1 && data.rating <= 5 &&
+             data.comment is string && data.comment.size() > 0 && data.comment.size() < 2000;
+    }
+
+    function isValidBlogPost(data) {
+      return data.title is string && data.title.size() > 0 && data.title.size() < 500 &&
+             data.content is string && data.content.size() > 0 && data.content.size() < 50000 &&
+             data.author is string && data.author.size() > 0 && data.author.size() < 100;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /products/{productId} {
+      allow read: if true;
+      allow create: if isAdmin() && isValidProduct(request.resource.data);
+      allow update: if isAdmin() && isValidProduct(request.resource.data);
+      allow delete: if isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow get: if isAdmin() || (isAuthenticated() && resource.data.user_id == request.auth.uid) || resource.data.user_id == null;
+      allow list: if isAdmin() || (isAuthenticated() && resource.data.user_id == request.auth.uid);
+      allow create: if isValidOrder(request.resource.data) && 
+                      (request.resource.data.get('user_id', null) == (request.auth == null ? null : request.auth.uid));
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if true;
+      allow create: if isAuthenticated() && isValidReview(request.resource.data);
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /blog/{postId} {
+      allow read: if true;
+      allow write: if isAdmin() && isValidBlogPost(request.resource.data);
+    }
+
+    match /user_profiles/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow write: if isOwner(userId) || isAdmin();
+    }
+
+    match /settings/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isAdmin();
+    }
+
+    match /content/{contentId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}
