@@ -9,7 +9,7 @@
     <script>
       // Ultimate suppression for Talisman/MetaMask extension errors and UI
       (function() {
-        const suppressPattern = /Talisman extension|onboarding|configured yet|MetaMask|Failed to connect to MetaMask|web3|ethereum/i;
+        const suppressPattern = /Talisman extension|onboarding|configured yet|MetaMask|web3|ethereum/i;
         
         // 1. CSS Injection (Immediate & Persistent)
         const injectStyles = () => {
@@ -43,7 +43,7 @@
         injectStyles();
         setInterval(injectStyles, 1000);
 
-        // 2. Neutralize window objects with a silent proxy (if they don't exist yet)
+        // 2. Neutralize window objects with a silent proxy
         const silentHandler = {
           get: (target, prop) => {
             if (prop === 'isMetaMask' || prop === 'isTalisman') return true;
@@ -61,36 +61,31 @@
 
         const neutralize = (name) => {
           try {
-            if (window[name]) return; // Don't touch if already exists
-            
-            Object.defineProperty(window, name, {
-              get: () => silentProxy,
-              set: () => {},
-              configurable: true // Keep it configurable to avoid redefinition errors
-            });
+            if (window[name] && window[name] !== silentProxy) {
+               // Try to overwrite if possible
+               try { window[name] = silentProxy; } catch (e) {}
+            } else if (!window[name]) {
+              Object.defineProperty(window, name, {
+                get: () => silentProxy,
+                set: () => {},
+                configurable: true
+              });
+            }
           } catch (e) {}
         };
-        ['talisman', 'metamask', 'ethereum', 'web3', 'BinanceChain', 'trustwallet'].forEach(neutralize);
+        ['talisman', 'metamask', 'ethereum', 'web3'].forEach(neutralize);
         
         // 3. Robust Console Override
         const wrapConsole = (method) => {
           const original = console[method];
           try {
-            const descriptor = Object.getOwnPropertyDescriptor(console, method);
-            if (descriptor && !descriptor.configurable) {
-              return;
-            }
-            Object.defineProperty(console, method, {
-              configurable: false,
-              writable: false,
-              value: function(...args) {
-                try {
-                  const str = args.join(' ');
-                  if (suppressPattern.test(str)) return;
-                } catch (e) {}
-                return original.apply(console, args);
-              }
-            });
+            console[method] = function(...args) {
+              try {
+                const str = args.join(' ');
+                if (suppressPattern.test(str)) return;
+              } catch (e) {}
+              return original.apply(console, args);
+            };
           } catch (e) {}
         };
         ['log', 'warn', 'error', 'info', 'debug', 'trace'].forEach(wrapConsole);
@@ -121,6 +116,18 @@
           } catch (err) {}
         }, true);
       })();
+
+      window.addEventListener('error', function(e) {
+        var root = document.getElementById('root');
+        if (root && !root.innerHTML.trim()) {
+          root.innerHTML = '<div style="padding: 20px; color: red; font-family: sans-serif;">' +
+            '<h2>Помилка завантаження</h2>' +
+            '<p>' + e.message + '</p>' +
+            '<p><small>' + e.filename + ':' + e.lineno + '</small></p>' +
+            '<button onclick="location.reload()">Оновити</button>' +
+            '</div>';
+        }
+      });
     </script>
   </head>
   <body>

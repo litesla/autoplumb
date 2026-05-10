@@ -4,9 +4,9 @@ let genAI: GoogleGenAI | null = null;
 
 function getGenAI() {
   if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
     if (!apiKey || apiKey === "undefined") {
-      throw new Error("GEMINI_API_KEY is not configured. Please set it in Netlify environment variables.");
+      throw new Error("GEMINI_API_KEY (VITE_GEMINI_API_KEY) is not configured. Please set it in Netlify environment variables.");
     }
     genAI = new GoogleGenAI({ apiKey });
   }

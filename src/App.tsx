@@ -108,8 +108,7 @@ const AppContent = () => {
 
   return (
     <div className="min-h-screen bg-white dark:bg-black font-['Inter',sans-serif] transition-colors duration-300">
-      <ErrorBoundary>
-        <div className="sticky top-0 z-[110]">
+      <div className="sticky top-0 z-[110]">
           <MaintenanceBanner />
           <Header 
             ref={headerRef}
@@ -186,25 +185,26 @@ const AppContent = () => {
         </footer>
         <WelcomeModal />
         <AIConsultant isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} />
-      </ErrorBoundary>
     </div>
   );
 };
 
 export default function App() {
   return (
-    <AuthProvider>
-      <ShopProvider>
-        <CartProvider>
-          <WishlistProvider>
-            <CompareProvider>
-              <Router>
-                <AppContent />
-              </Router>
-            </CompareProvider>
-          </WishlistProvider>
-        </CartProvider>
-      </ShopProvider>
-    </AuthProvider>
+    <ErrorBoundary>
+      <AuthProvider>
+        <ShopProvider>
+          <CartProvider>
+            <WishlistProvider>
+              <CompareProvider>
+                <Router>
+                  <AppContent />
+                </Router>
+              </CompareProvider>
+            </WishlistProvider>
+          </CartProvider>
+        </ShopProvider>
+      </AuthProvider>
+    </ErrorBoundary>
   );
 }

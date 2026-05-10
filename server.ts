@@ -2,7 +2,8 @@ import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import { fileURLToPath } from "url";
-import admin from "firebase-admin";
+import * as admin from "firebase-admin";
+import { getFirestore } from "firebase-admin/firestore";
 import fs from "fs";
 import axios from "axios";
 import * as xlsx from "xlsx";
@@ -16,18 +17,31 @@ export async function createExpressApp() {
   // Initialize Firebase Admin lazily
   let db: admin.firestore.Firestore | null = null;
   try {
-    const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-    if (fs.existsSync(configPath)) {
-      const firebaseConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+    // Try multiple possible paths for the config file
+    let firebaseConfig = null;
+    const pathsToTry = [
+      path.join(process.cwd(), "firebase-applet-config.json"),
+      path.join(__dirname, "firebase-applet-config.json"),
+      path.join(__dirname, "..", "firebase-applet-config.json"),
+      path.join(__dirname, "..", "..", "firebase-applet-config.json")
+    ];
+
+    for (const p of pathsToTry) {
+      if (fs.existsSync(p)) {
+        firebaseConfig = JSON.parse(fs.readFileSync(p, "utf-8"));
+        break;
+      }
+    }
+
+    if (firebaseConfig) {
       if (!admin.apps.length) {
         admin.initializeApp({
           projectId: firebaseConfig.projectId,
         });
       }
-      // Use the specific database ID if provided
-      db = admin.firestore(firebaseConfig.firestoreDatabaseId);
+      db = getFirestore(admin.apps[0], firebaseConfig.firestoreDatabaseId || "(default)");
     } else {
-      console.warn("firebase-applet-config.json not found. Firestore features will be disabled.");
+      console.warn("firebase-applet-config.json not found in expected locations.");
     }
   } catch (error) {
     console.error("Failed to initialize Firebase Admin:", error);
