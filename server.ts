@@ -10,9 +10,8 @@ import * as xlsx from "xlsx";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-async function startServer() {
+export async function createExpressApp() {
   const app = express();
-  const PORT = 3000;
 
   // Initialize Firebase Admin lazily
   let db: admin.firestore.Firestore | null = null;
@@ -185,11 +184,6 @@ async function startServer() {
       const data: any[] = xlsx.utils.sheet_to_json(worksheet);
 
       console.log(`Parsed ${data.length} products from UTR.`);
-      if (data.length > 0) {
-        console.log("Sample row from UTR:", JSON.stringify(data[0], null, 2));
-      } else {
-        return res.status(400).json({ error: "Отримано порожній файл від UTR." });
-      }
 
       if (!db) {
         throw new Error("Database not initialized");
@@ -264,10 +258,17 @@ async function startServer() {
     }
   });
 
-  // API Routes (Legacy/Placeholder - now handled by Firestore on client)
+  // Health check
   app.get("/api/health", (req, res) => {
     res.json({ status: "ok", message: "Server is running. Data is now managed via Firebase." });
   });
+
+  return app;
+}
+
+async function startServer() {
+  const app = await createExpressApp();
+  const PORT = 3000;
 
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
@@ -289,4 +290,7 @@ async function startServer() {
   });
 }
 
-startServer();
+// Only start the server if not being imported as a module (e.g. by Netlify)
+if (process.env.NODE_ENV !== "production" || !process.env.NETLIFY) {
+  startServer();
+}

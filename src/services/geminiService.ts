@@ -1,6 +1,17 @@
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let genAI: GoogleGenAI | null = null;
+
+function getGenAI() {
+  if (!genAI) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey || apiKey === "undefined") {
+      throw new Error("GEMINI_API_KEY is not configured. Please set it in Netlify environment variables.");
+    }
+    genAI = new GoogleGenAI({ apiKey });
+  }
+  return genAI;
+}
 
 export interface ColumnMapping {
   name: string;
@@ -33,6 +44,7 @@ export async function getColumnMapping(sampleData: any[]): Promise<ColumnMapping
       If a field is not found, use an empty string.
     `;
 
+    const ai = getGenAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
@@ -82,6 +94,7 @@ export async function getGeminiResponse(prompt: string, products: any[]) {
       5. Використовуйте Markdown для форматування (жирний текст, списки).
     `;
 
+    const ai = getGenAI();
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,

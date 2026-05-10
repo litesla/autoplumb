@@ -29,9 +29,42 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
   });
   const headerRef = useRef<HTMLDivElement>(null);
+  const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setShowSuggestions(false);
+    navigate('/');
+    // Scroll to products section if we're on home page
+    if (window.location.pathname === '/') {
+      const productsSection = document.getElementById('products');
+      productsSection?.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setActiveSuggestionIndex(prev => 
+        prev < searchSuggestions.length - 1 ? prev + 1 : prev
+      );
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setActiveSuggestionIndex(prev => prev > -1 ? prev - 1 : -1);
+    } else if (e.key === 'Enter') {
+      if (activeSuggestionIndex >= 0 && searchSuggestions[activeSuggestionIndex]) {
+        e.preventDefault();
+        const selected = searchSuggestions[activeSuggestionIndex];
+        navigate(`/product/${selected.id}`);
+        setShowSuggestions(false);
+      }
+    } else if (e.key === 'Escape') {
+      setShowSuggestions(false);
+    }
+  };
 
   useImperativeHandle(ref, () => ({
     openSearch: () => {
@@ -80,9 +113,10 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           (p.brand && p.brand.toLowerCase().includes(searchQuery.toLowerCase()))
         )
-        .slice(0, 5);
+        .slice(0, 8);
       setSearchSuggestions(filtered);
       setShowSuggestions(true);
+      setActiveSuggestionIndex(-1);
     } else {
       setSearchSuggestions([]);
       setShowSuggestions(false);
@@ -262,7 +296,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
         </nav>
 
         <div className="flex-1 max-w-md mx-8 hidden lg:block">
-          <div className="relative group">
+          <form onSubmit={handleSearchSubmit} className="relative group">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-600 transition-colors" size={18} />
             <input
               ref={searchInputRef}
@@ -270,12 +304,13 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setShowSuggestions(true)}
-              placeholder="Пошук товарів..."
+              onKeyDown={handleKeyDown}
+              placeholder="Пошук товарів за назвою або брендом..."
               className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus:border-blue-500/20 rounded-2xl py-2.5 pl-12 pr-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/5 transition-all dark:text-white"
             />
             
             <AnimatePresence>
-              {showSuggestions && searchSuggestions.length > 0 && (
+              {showSuggestions && searchQuery.length > 1 && (
                 <motion.div
                   initial={{ opacity: 0, y: 10, scale: 0.95 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -283,44 +318,69 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                   className="absolute top-full left-0 right-0 mt-3 bg-white dark:bg-gray-900 rounded-[32px] shadow-2xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-gray-800 overflow-hidden z-[60]"
                 >
                   <div className="p-3">
-                    {searchSuggestions.map((product) => (
-                      <Link
-                        key={product.id}
-                        to={`/product/${product.id}`}
-                        onClick={() => setShowSuggestions(false)}
-                        className="w-full flex items-center space-x-4 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all text-left group"
+                    {searchSuggestions.length > 0 ? (
+                      searchSuggestions.map((product, index) => (
+                        <Link
+                          key={product.id}
+                          to={`/product/${product.id}`}
+                          onClick={() => setShowSuggestions(false)}
+                          onMouseEnter={() => setActiveSuggestionIndex(index)}
+                          className={`w-full flex items-center space-x-4 p-3 rounded-2xl transition-all text-left group ${
+                            activeSuggestionIndex === index 
+                              ? 'bg-blue-50 dark:bg-blue-900/30 ring-1 ring-blue-100 dark:ring-blue-800' 
+                              : 'hover:bg-gray-50 dark:hover:bg-gray-800'
+                          }`}
+                        >
+                          <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-700">
+                            <img 
+                              src={product.image || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
+                              alt={product.name}
+                              className="w-full h-full object-cover group-hover:scale-110 transition-transform"
+                              referrerPolicy="no-referrer"
+                            />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className={`text-sm font-black truncate transition-colors ${
+                              activeSuggestionIndex === index ? 'text-blue-600' : 'text-gray-900 dark:text-white group-hover:text-blue-600'
+                            }`}>{product.name}</div>
+                            <div className="text-xs text-gray-500 font-medium">
+                              {product.brand && <span className="text-gray-900 dark:text-gray-300 mr-2">{product.brand}</span>}
+                              {product.brand && <span className="opacity-30">•</span>}
+                              <span className="text-blue-600 font-black ml-2">{product.price} грн</span>
+                            </div>
+                          </div>
+                          <div className={`p-2 rounded-lg transition-all ${
+                            activeSuggestionIndex === index ? 'bg-blue-600 text-white' : 'bg-gray-50 dark:bg-gray-800 group-hover:bg-blue-600 group-hover:text-white'
+                          }`}>
+                            <ArrowRight size={14} />
+                          </div>
+                        </Link>
+                      ))
+                    ) : (
+                      <div className="p-8 text-center">
+                        <div className="w-12 h-12 bg-gray-50 dark:bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-3">
+                          <Search size={20} className="text-gray-300" />
+                        </div>
+                        <p className="text-sm font-bold text-gray-900 dark:text-white">Нічого не знайдено</p>
+                        <p className="text-xs text-gray-500 mt-1">Спробуйте інші ключові слова</p>
+                      </div>
+                    )}
+                  </div>
+                  {searchSuggestions.length > 0 && (
+                    <div className="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex justify-center">
+                      <button 
+                        type="submit"
+                        className="text-xs font-black text-blue-600 hover:text-blue-700 transition-colors flex items-center space-x-2"
                       >
-                        <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-700">
-                          <img 
-                            src={product.image || `https://picsum.photos/seed/${product.id}/100/100`} 
-                            alt={product.name}
-                            className="w-full h-full object-cover group-hover:scale-110 transition-transform"
-                            referrerPolicy="no-referrer"
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm font-black text-gray-900 dark:text-white truncate group-hover:text-blue-600 transition-colors">{product.name}</div>
-                          <div className="text-xs text-gray-500 font-medium">{product.brand} • <span className="text-blue-600 font-black">{product.price} грн</span></div>
-                        </div>
-                        <div className="p-2 bg-gray-50 dark:bg-gray-800 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-all">
-                          <ArrowRight size={14} />
-                        </div>
-                      </Link>
-                    ))}
-                  </div>
-                  <div className="p-4 bg-gray-50 dark:bg-gray-800 border-t border-gray-100 dark:border-gray-700 flex justify-center">
-                    <button 
-                      onClick={() => setShowSuggestions(false)}
-                      className="text-xs font-black text-blue-600 hover:text-blue-700 transition-colors flex items-center space-x-2"
-                    >
-                      <span>Показати всі результати</span>
-                      <ArrowRight size={12} />
-                    </button>
-                  </div>
+                        <span>Показати всі результати для "{searchQuery}"</span>
+                        <ArrowRight size={12} />
+                      </button>
+                    </div>
+                  )}
                 </motion.div>
               )}
             </AnimatePresence>
-          </div>
+          </form>
         </div>
 
         <div className="flex items-center space-x-2 md:space-x-4">
@@ -582,9 +642,9 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               initial={{ y: -100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -100, opacity: 0 }}
-              className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 z-[120] p-4 shadow-2xl rounded-b-[32px]"
+              className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 z-[120] p-4 shadow-2xl rounded-b-[32px] overflow-hidden"
             >
-              <div className="flex items-center gap-4 mb-4">
+              <form onSubmit={handleSearchSubmit} className="flex items-center gap-4 mb-4">
                 <div className="relative flex-1">
                   <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                   <input
@@ -592,41 +652,54 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Пошук товарів..."
+                    placeholder="Пошук за назвою або брендом..."
                     className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus:border-blue-500/20 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/5 transition-all dark:text-white"
                   />
                 </div>
                 <button 
+                  type="button"
                   onClick={() => setIsMobileSearchOpen(false)}
                   className="p-3 bg-gray-50 dark:bg-gray-800 text-gray-500 rounded-2xl active:scale-90"
                 >
                   <X size={20} />
                 </button>
-              </div>
+              </form>
 
-              {searchSuggestions.length > 0 && (
-                <div className="max-h-[60vh] overflow-y-auto space-y-2 pb-4">
-                  {searchSuggestions.map((product) => (
-                    <Link
-                      key={product.id}
-                      to={`/product/${product.id}`}
-                      onClick={() => setIsMobileSearchOpen(false)}
-                      className="flex items-center gap-4 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all"
-                    >
-                      <div className="w-12 h-12 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden flex-shrink-0">
-                        <img 
-                          src={product.image || `https://picsum.photos/seed/${product.id}/100/100`} 
-                          alt={product.name}
-                          className="w-full h-full object-cover"
-                          referrerPolicy="no-referrer"
-                        />
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="text-sm font-black text-gray-900 dark:text-white truncate">{product.name}</div>
-                        <div className="text-xs text-blue-600 font-black">{product.price} грн</div>
-                      </div>
-                    </Link>
-                  ))}
+              {searchQuery.length > 1 && (
+                <div className="max-h-[60vh] overflow-y-auto space-y-2 pb-4 px-2 no-scrollbar">
+                  {searchSuggestions.length > 0 ? (
+                    searchSuggestions.map((product) => (
+                      <Link
+                        key={product.id}
+                        to={`/product/${product.id}`}
+                        onClick={() => setIsMobileSearchOpen(false)}
+                        className="flex items-center gap-4 p-3 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all border border-gray-100 dark:border-gray-800"
+                      >
+                        <div className="w-14 h-14 bg-white dark:bg-gray-900 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-800">
+                          <img 
+                            src={product.image || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
+                            alt={product.name}
+                            className="w-full h-full object-cover"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-sm font-black text-gray-900 dark:text-white truncate">{product.name}</div>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                              {product.brand || 'No Brand'}
+                            </span>
+                            <span className="text-xs text-blue-600 font-black">{product.price} грн</span>
+                          </div>
+                        </div>
+                      </Link>
+                    ))
+                  ) : (
+                    <div className="py-12 text-center">
+                      <Search size={32} className="mx-auto text-gray-200 mb-3" />
+                      <p className="text-gray-500 font-bold">Нічого не знайдено</p>
+                    </div>
+                  )}
                 </div>
               )}
             </motion.div>
