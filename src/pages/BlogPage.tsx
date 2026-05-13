@@ -31,7 +31,12 @@ export const BlogPage: React.FC = () => {
         .order('created_at', { ascending: false });
       
       if (data) {
-        setPosts(data as unknown as BlogPost[]);
+        setPosts(data.map(post => ({
+          ...post,
+          image: (post as any).image_url || (post as any).image || '',
+          readTime: (post as any).read_time || (post as any).readTime || '',
+          createdAt: (post as any).created_at || (post as any).createdAt || new Date().toISOString()
+        })) as BlogPost[]);
       }
       setLoading(false);
     };

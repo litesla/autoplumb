@@ -25,7 +25,13 @@ export const ArticlePage: React.FC = () => {
           .single();
         
         if (data) {
-          const postData = data as unknown as BlogPost;
+          const rawPost = data as any;
+          const postData: BlogPost = {
+            ...rawPost,
+            image: rawPost.image_url || rawPost.image || '',
+            readTime: rawPost.read_time || rawPost.readTime || '',
+            createdAt: rawPost.created_at || rawPost.createdAt || new Date().toISOString()
+          };
           setPost(postData);
           
           // Fetch related posts
@@ -37,7 +43,12 @@ export const ArticlePage: React.FC = () => {
             .limit(3);
           
           if (related) {
-            setRelatedPosts(related as unknown as BlogPost[]);
+            setRelatedPosts(related.map(p => ({
+              ...p,
+              image: (p as any).image_url || (p as any).image || '',
+              readTime: (p as any).read_time || (p as any).readTime || '',
+              createdAt: (p as any).created_at || (p as any).createdAt || new Date().toISOString()
+            })) as BlogPost[]);
           }
         } else {
           navigate('/blog');

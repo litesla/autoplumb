@@ -192,5 +192,66 @@ export async function createExpressApp() {
     res.json({ status: "ok" });
   });
 
+  app.post("/api/blog/generate", async (req, res) => {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) return res.status(500).json({ error: "GEMINI_API_KEY not configured" });
+
+      const { GoogleGenAI } = await import("@google/genai");
+      const client = new GoogleGenAI({ apiKey });
+      
+      const prompt = `
+        Згенеруй цікаву SEO-статтю для блогу інтернет-магазину автотоварів та сантехніки "AutoPlumb".
+        Тема повинна бути або про догляд за авто, або про вибір сантехніки (вибери випадково або змішай).
+        
+        Вимоги:
+        1. Мова: Українська.
+        2. Заголовок (Title).
+        3. Короткий опис (Excerpt) до 200 символів.
+        4. Повний текст статті в форматі Markdown.
+        5. Категорія (наприклад: Поради, Новинки, Сантехніка, Авто).
+        6. Час читання (наприклад: 5 хв).
+        
+        Поверни результат ТІЛЬКИ як чистий JSON без жодних markdown-тегів:
+        {
+          "title": "...",
+          "excerpt": "...",
+          "content": "...",
+          "category": "...",
+          "read_time": "..."
+        }
+      `;
+
+      const response = await client.models.generateContent({
+        model: "gemini-1.5-flash",
+        contents: [{ role: "user", parts: [{ text: prompt }] }]
+      });
+      
+      const text = response.text;
+      if (!text) throw new Error("No text returned from AI");
+      
+      // Clean possible JSON markers
+      const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      const postData = JSON.parse(cleanJson);
+
+      const { error } = await supabase.from("blog").insert({
+        title: postData.title,
+        excerpt: postData.excerpt,
+        content: postData.content,
+        author: "AutoPlumb AI",
+        category: postData.category,
+        read_time: postData.read_time,
+        image_url: "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&q=80&w=800",
+        created_at: new Date().toISOString()
+      });
+
+      if (error) throw error;
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("AI Generation failed:", error);
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   return app;
 }

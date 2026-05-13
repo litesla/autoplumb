@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2 } from 'lucide-react';
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
 import * as XLSX from 'xlsx';
@@ -13,7 +13,7 @@ import { getColumnMapping, ColumnMapping } from '../services/geminiService';
 export const AdminPage: React.FC = () => {
   const { isAdmin, loading } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'content' | 'settings' | 'blog'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'content' | 'settings' | 'blog' | 'diagnostics'>('dashboard');
   const [products, setProducts] = useState<Product[]>([]);
   const [totalProductsCount, setTotalProductsCount] = useState(0);
   const [productSearch, setProductSearch] = useState('');
@@ -76,10 +76,22 @@ export const AdminPage: React.FC = () => {
     notifications: true
   });
 
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isGeneratingPost, setIsGeneratingPost] = useState(false);
+
   const refreshAllData = async () => {
     if (!isAdmin) return;
+    setIsRefreshing(true);
     
     try {
+      // Check connection first to give better feedback
+      const { error: pingError } = await supabase.from('products').select('id').limit(1);
+      if (pingError && pingError.message.includes('Failed to fetch')) {
+        alert('Помилка з\'єднання з Supabase. Перевірте інтернет або чи не заснув проект.');
+        setIsRefreshing(false);
+        return;
+      }
+
       const [{ count }, { data: pData }, { data: oData }, { data: bData }] = await Promise.all([
         supabase.from('products').select('*', { count: 'exact', head: true }),
         supabase.from('products').select('*').order('created_at', { ascending: false }).limit(100),
@@ -105,13 +117,20 @@ export const AdminPage: React.FC = () => {
       }
 
       if (bData) {
-        setBlogPosts(bData as unknown as BlogPost[]);
+        setBlogPosts(bData.map(post => ({
+          ...post,
+          image: (post as any).image_url || (post as any).image || '',
+          readTime: (post as any).read_time || (post as any).readTime || '',
+          createdAt: (post as any).created_at || (post as any).createdAt || new Date().toISOString()
+        })) as BlogPost[]);
       }
 
       fetchSettings();
       fetchHeroContent();
     } catch (err) {
       console.error('Error refreshing admin data:', err);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
@@ -182,7 +201,7 @@ export const AdminPage: React.FC = () => {
 
 1. **Зниження тиску води:** Це може свідчити про корозію або засмічення труб всередині.
 2. **Поява іржі на з'єднаннях:** Навіть маленька пляма іржі — це майбутня дірка, яка чекає моменту, щоб лопнути.
-3. **Постійний шум у трубах:** Стук або гул при відкритті кранів часто вказує на нестабільність тиску або знос клапанів.
+3. **Постоянний шум у трубах:** Стук або гул при відкритті кранів часто вказує на нестабільність тиску або знос клапанів.
 4. **Неприємний запах:** Можливі проблеми з сифонами або герметичністю каналізаційних з'єднань.
 5. **Конденсат на трубах:** Надмірне запотівання труб може призвести до грибка та прискореної корозії.
 
@@ -287,19 +306,28 @@ export const AdminPage: React.FC = () => {
       }
     ];
 
-    for (const post of initialPosts) {
-      await supabase.from('blog').insert({
-        title: post.title,
-        excerpt: post.excerpt,
-        content: post.content,
-        author: post.author,
-        category: post.category,
-        image_url: post.image,
-        read_time: post.readTime,
-        created_at: new Date().toISOString()
-      });
+    try {
+      for (const post of initialPosts) {
+        const { error } = await supabase.from('blog').insert({
+          title: post.title,
+          excerpt: post.excerpt,
+          content: post.content,
+          author: post.author,
+          category: post.category,
+          image_url: post.image,
+          read_time: post.readTime,
+          created_at: new Date().toISOString()
+        });
+        if (error) {
+          console.error('Error inserting initial post:', error);
+          // Continue with next post instead of stopping
+        }
+      }
+      alert('Блог успішно заповнено професійними SEO статтями!');
+      refreshAllData();
+    } catch (err: any) {
+      alert(`Помилка при заповненні блогу: ${err.message}`);
     }
-    alert('Блог успішно заповнено професійними SEO статтями!');
   };
 
   const fetchHeroContent = async () => {
@@ -536,21 +564,29 @@ export const AdminPage: React.FC = () => {
   const handleAddPost = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const { error } = await supabase.from('blog').insert({
+      const { error, data } = await supabase.from('blog').insert({
         title: newPost.title,
         excerpt: newPost.excerpt,
         content: newPost.content,
         author: newPost.author,
         category: newPost.category,
         image_url: newPost.image,
-        read_time: newPost.readTime
-      });
-      if (error) throw error;
+        read_time: newPost.readTime,
+        created_at: new Date().toISOString()
+      }).select();
+
+      if (error) {
+        console.error('Supabase error creating post:', error);
+        throw error;
+      }
+      
       setIsAddingPost(false);
       setNewPost({ title: '', excerpt: '', content: '', author: 'Адміністратор', category: 'Поради', image: '', readTime: '5 хв' });
       alert('Статтю успішно додано!');
-    } catch (err) {
-      alert('Помилка при додаванні статті');
+      refreshAllData();
+    } catch (err: any) {
+      console.error('Full error object:', err);
+      alert(`Помилка при додаванні статті: ${err.message || String(err)}`);
     }
   };
 
@@ -567,16 +603,19 @@ export const AdminPage: React.FC = () => {
         author: data.author,
         category: data.category,
         image_url: (data as any).image_url || (data as any).image,
-        read_time: (data as any).read_time || (data as any).readTime
-      })
-      .eq('id', id);
-    
-    if (error) {
-      alert('Помилка при оновленні статті');
-    } else {
-      setEditingPost(null);
-    }
-  };
+      read_time: (data as any).readTime || (data as any).read_time,
+      created_at: (data as any).createdAt || (data as any).created_at || new Date().toISOString()
+    })
+    .eq('id', id);
+  
+  if (error) {
+    console.error('Update post error:', error);
+    alert(`Помилка при оновленні статті: ${error.message}`);
+  } else {
+    setEditingPost(null);
+    refreshAllData();
+  }
+};
 
   const handleDeletePost = async (id: string) => {
     if (confirm('Ви впевнені, що хочете видалити цю статтю?')) {
@@ -782,25 +821,37 @@ export const AdminPage: React.FC = () => {
   };
 
   const checkSupabaseConnection = async () => {
-    if (!supabase || !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('missing-supabase-url')) {
-      alert('Supabase не налаштовано! Додайте VITE_SUPABASE_URL та VITE_SUPABASE_ANON_KEY у налаштуваннях.');
+    const url = import.meta.env.VITE_SUPABASE_URL || '';
+    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+    const currentHost = window.location.hostname;
+    
+    if (!url || url.includes('missing-supabase-url') || url === '111') {
+      let advice = 'Додайте VITE_SUPABASE_URL та VITE_SUPABASE_ANON_KEY у налаштуваннях.';
+      if (currentHost.includes('netlify.app')) {
+        advice = 'Ви на Netlify. Будь ласка, перейдіть у налаштування сайту (Site Settings → Environment Variables) і додайте ці змінні там.';
+      } else if (currentHost.includes('google.com') || currentHost.includes('ais-dev')) {
+        advice = 'Встановіть справжні URL та Key у Settings → Secrets в AI Studio.';
+      }
+      
+      alert(`Supabase не налаштовано!\n\n${advice}`);
+      setActiveTab('diagnostics');
       return false;
     }
 
     try {
       console.log('🔍 Checking Supabase connection details...');
-      const url = import.meta.env.VITE_SUPABASE_URL || '';
+      console.log('Host:', currentHost);
       console.log('URL:', url);
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
       console.log('Key prefix:', anonKey.substring(0, 15) + '...');
 
       if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
-        alert(`УВАГА! Ваш Supabase URL виглядає некоректним: "${url}"\n\nВін зазвичай починається з "https://" і закінчується на ".supabase.co".\nБудь ласка, перевірте його в налаштуваннях (Settings -> Secrets).`);
+        alert(`УВАГА! Ваш Supabase URL виглядає некоректним: "${url}"\n\nВін зазвичай починається з "https://" і закінчується на ".supabase.co".`);
+        setActiveTab('diagnostics');
         return false;
       }
 
       if (url === '111' || anonKey.includes('111')) {
-        alert('УВАГА! У ваших секретах (Settings -> Secrets) встановлено значення "111".\n\nБудь ласка, видаліть їх або встановіть реальні URL та Key від Supabase.');
+        alert('УВАГА! У ваших секретах (Settings → Secrets) встановлено значення "111".\n\nБудь ласка, видаліть їх або встановіть реальні URL та Key від Supabase.');
         return false;
       }
 
@@ -828,7 +879,7 @@ export const AdminPage: React.FC = () => {
       const msg = err.message || String(err);
       if (msg.includes('Failed to fetch') || err.name === 'TypeError') {
         const currentUrl = import.meta.env.VITE_SUPABASE_URL;
-        alert(`Помилка з'єднання ("Failed to fetch")!\n\nЦе означає, що браузер не може зв'язатися з Supabase.\nВаш поточний URL: ${currentUrl}\n\nЯКЩО URL ВЕРНИЙ: Спробуйте вимкнути VPN або змінити браузер.\nЯКЩО URL НЕВІРНИЙ: Виправте його в налаштуваннях (Settings -> Secrets).`);
+        alert(`Помилка з'єднання ("Failed to fetch")!\n\nЦе означає, що браузер не може зв'язатися з Supabase.\nВаш поточний URL: ${currentUrl}\n\nЯКЩО URL ВЕРНИЙ: Спробуйте вимкнути VPN або змінити браузер.\nЯКЩО URL НЕВІРНИЙ: Виправте його в налаштуваннях (Settings → Secrets).`);
       } else {
         alert(`Помилка підключення: ${msg}`);
       }
@@ -1185,15 +1236,26 @@ export const AdminPage: React.FC = () => {
             <span>Контент</span>
           </button>
         </nav>
+        <div className="mt-8 space-y-2">
           <button 
-            onClick={() => setActiveTab('settings' as any)}
+            onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
-              activeTab === ('settings' as any) ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+              activeTab === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
             }`}
           >
             <Settings size={20} />
             <span>Налаштування</span>
           </button>
+          <button 
+            onClick={() => setActiveTab('diagnostics')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+              activeTab === 'diagnostics' ? 'bg-red-50 text-red-600' : 'text-gray-400 hover:bg-gray-50'
+            }`}
+          >
+            <AlertTriangle size={20} />
+            <span>Діагностика БД</span>
+          </button>
+        </div>
       </aside>
 
       {/* AI Mapping Confirmation Modal */}
@@ -1735,10 +1797,11 @@ export const AdminPage: React.FC = () => {
               <div className="flex flex-wrap gap-4">
                 <button 
                   onClick={refreshAllData}
+                  disabled={isRefreshing}
                   className="p-3 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-all flex items-center space-x-2"
                   title="Оновити дані"
                 >
-                  <Plus className={(isImporting || totalProductsCount === 0) ? 'animate-spin' : ''} size={18} />
+                  <RotateCw className={isRefreshing ? 'animate-spin' : ''} size={18} />
                   <span className="font-bold">Оновити</span>
                 </button>
                 <div className="relative">
@@ -2043,13 +2106,41 @@ export const AdminPage: React.FC = () => {
           <div className="space-y-8">
             <div className="flex items-center justify-between">
               <h1 className="text-4xl font-black text-gray-900">Управління блогом</h1>
-              <div className="flex space-x-4">
+              <div className="flex flex-wrap gap-4">
                 <button 
                   onClick={seedBlogPosts}
+                  disabled={isRefreshing}
                   className="flex items-center space-x-2 bg-white border border-gray-200 px-6 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all"
                 >
                   <Sparkles size={18} className="text-blue-600" />
-                  <span>Заповнити демо-даними</span>
+                  <span>Демо-статті</span>
+                </button>
+                <button 
+                  onClick={async () => {
+                    if (confirm('Бажаєте, щоб AI написав нову SEO-статтю для вашого блогу?')) {
+                      setIsGeneratingPost(true);
+                      try {
+                        const response = await fetch('/api/blog/generate', { method: 'POST' });
+                        const data = await response.json();
+                        if (data.success) {
+                          alert('AI успішно створив нову статтю!');
+                          refreshAllData();
+                        } else {
+                          console.error('Generation error:', data);
+                          alert(`Помилка: ${data.error || 'Не вдалося згенерувати статтю'}\n\nПорада: Перевірте вкладку "Діагностика БД", можливо таблиця "blog" ще не створена.`);
+                        }
+                      } catch (err: any) {
+                        alert(`Помилка при запиті до AI: ${err.message}\n\nПереконайтеся, що сервер запущений та налаштований GEMINI_API_KEY.`);
+                      } finally {
+                        setIsGeneratingPost(false);
+                      }
+                    }
+                  }}
+                  disabled={isGeneratingPost}
+                  className="flex items-center space-x-2 bg-purple-50 text-purple-600 border border-purple-100 px-6 py-3 rounded-xl font-bold hover:bg-purple-100 transition-all"
+                >
+                  <Wand2 size={18} className={isGeneratingPost ? 'animate-bounce' : ''} />
+                  <span>Написати через AI</span>
                 </button>
                 <button 
                   onClick={() => setIsAddingPost(true)}
@@ -2351,6 +2442,119 @@ export const AdminPage: React.FC = () => {
                     </div>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === ('diagnostics' as any) && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-4xl font-black text-gray-900">Діагностика бази даних</h1>
+                <p className="text-gray-500 font-medium">Виправлення помилок структури Supabase</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="flex items-center space-x-3 mb-6 text-blue-600 font-bold">
+                  <Package size={24} />
+                  <h3>Таблиця Products</h3>
+                </div>
+                <div className="space-y-4">
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">Якщо ви бачите помилку <b>"column 'type' does not exist"</b>, виконайте цей SQL запит у вашій SQL-панелі Supabase:</p>
+                  <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto">
+                    {`-- Додати колонку type
+ALTER TABLE products ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'auto';
+
+-- Додати колонку brand
+ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT;
+
+-- Додати колонку article
+ALTER TABLE products ADD COLUMN IF NOT EXISTS article TEXT;
+
+-- Додати колонку image_url (якщо немає)
+ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`}
+                  </pre>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(`ALTER TABLE products ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'auto';\nALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT;\nALTER TABLE products ADD COLUMN IF NOT EXISTS article TEXT;\nALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`);
+                      alert('SQL скопійовано!');
+                    }}
+                    className="w-full py-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl font-bold text-sm hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-all"
+                  >
+                    Скопіювати SQL
+                  </button>
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+                <div className="flex items-center space-x-3 mb-6 text-purple-600 font-bold">
+                  <BookOpen size={24} />
+                  <h3>Таблиця Blog</h3>
+                </div>
+                <div className="space-y-4">
+                  <p className="text-gray-600 dark:text-gray-400 text-sm">Якщо блок або статті не працюють, створіть таблицю <b>blog</b> цим запитом:</p>
+                  <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto">
+                    {`CREATE TABLE IF NOT EXISTS blog (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  title TEXT NOT NULL,
+  excerpt TEXT,
+  content TEXT,
+  author TEXT,
+  category TEXT,
+  read_time TEXT,
+  image_url TEXT,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);`}
+                  </pre>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(`CREATE TABLE IF NOT EXISTS blog (\n  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n  title TEXT NOT NULL,\n  excerpt TEXT,\n  content TEXT,\n  author TEXT,\n  category TEXT,\n  read_time TEXT,\n  image_url TEXT,\n  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);`);
+                      alert('SQL скопійовано!');
+                    }}
+                    className="w-full py-3 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-xl font-bold text-sm hover:bg-purple-100 dark:hover:bg-purple-800/50 transition-all"
+                  >
+                    Скопіювати SQL
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              <div className="bg-amber-50 dark:bg-amber-900/10 border border-amber-100 dark:border-amber-900/30 p-8 rounded-[32px]">
+                <div className="flex items-center space-x-3 mb-4 text-amber-600">
+                  <Settings size={24} />
+                  <h4 className="font-bold">Налаштування на Netlify</h4>
+                </div>
+                <p className="text-sm text-amber-800 dark:text-amber-400 mb-4">
+                  Якщо ви задеплоїли додаток на Netlify, вам потрібно вручну додати змінні оточення:
+                </p>
+                <ol className="text-xs text-amber-800 dark:text-amber-400 list-decimal ml-4 space-y-2">
+                  <li>Зайдіть у дешборд <b>Netlify</b></li>
+                  <li>Оберіть свій сайт → <b>Site configuration</b></li>
+                  <li><b>Environment variables</b> → <b>Add a variable</b></li>
+                  <li>Додайте <b>VITE_SUPABASE_URL</b> та його значення</li>
+                  <li>Додайте <b>VITE_SUPABASE_ANON_KEY</b> та його значення</li>
+                  <li>Додайте <b>GEMINI_API_KEY</b> для роботи Blog AI</li>
+                  <li>Перезапустіть деплой (Deploys → Trigger deploy)</li>
+                </ol>
+              </div>
+
+              <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700 p-8 rounded-[32px]">
+                <div className="flex items-center space-x-3 mb-4 text-gray-600 dark:text-gray-400">
+                  <RotateCw size={24} />
+                  <h4 className="font-bold">Після виправлення</h4>
+                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                  Коли ви внесете зміни в базу або налаштування на Netlify:
+                </p>
+                <ul className="text-xs text-gray-600 dark:text-gray-400 list-disc ml-4 space-y-2">
+                  <li>Обов'язково оновіть сторінку в браузері</li>
+                  <li>Використовуйте кнопку "Оновити" для перевірки з'єднання</li>
+                  <li>Якщо помилки залишаються, перевірте чи немає зайвих пробілів у секретах</li>
+                </ul>
               </div>
             </div>
           </div>
