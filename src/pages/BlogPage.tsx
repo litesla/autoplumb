@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 import { motion } from 'motion/react';
 import { BookOpen, Calendar, User, ArrowRight, Search, Tag } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
@@ -25,23 +24,19 @@ export const BlogPage: React.FC = () => {
   const navigate = useNavigate();
 
   useEffect(() => {
-    const blogPath = 'blog';
-    const q = query(collection(db, blogPath), orderBy('createdAt', 'desc'));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const postsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString()
-      })) as BlogPost[];
-      setPosts(postsData);
+    const fetchBlog = async () => {
+      const { data, error } = await supabase
+        .from('blog')
+        .select('*')
+        .order('created_at', { ascending: false });
+      
+      if (data) {
+        setPosts(data as unknown as BlogPost[]);
+      }
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, blogPath);
-      setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchBlog();
   }, []);
 
   const categories = ['Всі', ...Array.from(new Set(posts.map(p => p.category)))];

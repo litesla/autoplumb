@@ -1,25 +1,44 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { useShop } from '../context/ShopContext';
-
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 
 export const Hero: React.FC = () => {
   const { mode } = useShop();
   const [dynamicContent, setDynamicContent] = React.useState<any>(null);
 
   React.useEffect(() => {
-    const path = 'content/hero';
-    const unsubscribe = onSnapshot(doc(db, 'content', 'hero'), (doc) => {
-      if (doc.exists()) {
-        setDynamicContent(doc.data());
+    const fetchHero = async () => {
+      const { data } = await supabase
+        .from('content')
+        .select('*')
+        .eq('key', 'hero')
+        .single();
+      
+      if (data) {
+        setDynamicContent(data.value);
       }
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, path);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchHero();
+
+    const channel = supabase
+      .channel('hero_content')
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'content',
+        filter: 'key=eq.hero'
+      }, payload => {
+        if (payload.new) {
+          setDynamicContent((payload.new as any).value);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const defaultContent = {
@@ -71,17 +90,17 @@ export const Hero: React.FC = () => {
             {current.description}
           </p>
           
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 px-4">
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 px-4 max-w-sm mx-auto sm:max-w-none">
             <button 
               onClick={() => document.getElementById('products')?.scrollIntoView({ behavior: 'smooth' })}
-              className="w-full sm:w-auto px-8 py-4 bg-blue-600 text-white font-black text-base rounded-2xl shadow-2xl shadow-blue-600/30 active:scale-95 transition-all"
+              className="w-full sm:w-auto px-10 py-5 md:px-8 md:py-4 bg-blue-600 text-white font-black text-base rounded-2xl shadow-2xl shadow-blue-600/40 active:scale-95 transition-all text-center"
             >
               {current.button}
             </button>
             
             <button 
               onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' })}
-              className="w-full sm:w-auto px-8 py-4 bg-white dark:bg-gray-900 text-gray-900 dark:text-white font-black text-base rounded-2xl border border-gray-100 dark:border-gray-800 active:scale-95 transition-all"
+              className="w-full sm:w-auto px-10 py-5 md:px-8 md:py-4 bg-white dark:bg-gray-900 text-gray-900 dark:text-white font-black text-base rounded-2xl border border-gray-100 dark:border-gray-800 active:scale-95 transition-all text-center md:shadow-sm"
             >
               Контакти
             </button>

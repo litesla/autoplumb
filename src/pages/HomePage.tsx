@@ -5,59 +5,141 @@ import { ProductCard } from '../components/ProductCard';
 import { FilterSidebar } from '../components/FilterSidebar';
 import { useShop } from '../context/ShopContext';
 import { Product } from '../lib/utils';
-import { Car, Droplets, Package, SlidersHorizontal, ArrowRight } from 'lucide-react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
+import { SlidersHorizontal, ArrowRight, Car, Droplets, Package } from 'lucide-react';
+import { supabase } from '../lib/supabaseClient';
+import { useAuth } from '../context/AuthContext';
+
+const ITEMS_PER_PAGE = 24;
 
 export const HomePage: React.FC = () => {
   const { mode, setMode, searchQuery, selectedCategory, priceRange, selectedBrands } = useShop();
+  const { isAdmin } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [visibleCount, setVisibleCount] = useState(50);
+  const [page, setPage] = useState(0);
+  const [hasMore, setHasMore] = useState(true);
+  const [totalCount, setTotalCount] = useState(0);
 
-  useEffect(() => {
-    setLoading(true);
-    setVisibleCount(50); // Reset visible count when mode changes
-    const path = 'products';
-    // Limit to 400 products to prevent quota exhaustion and performance issues
-    const q = query(collection(db, path), where('type', '==', mode), limit(400));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const productsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Product[];
-      console.log(`Loaded ${productsData.length} products for mode: ${mode}`);
-      if (productsData.length > 0) {
-        console.log("Sample product:", productsData[0]);
+  const fetchProducts = async (pageNumber: number, isInitial = false) => {
+    if (isInitial) setLoading(true);
+    else setLoadingMore(true);
+
+    try {
+      let query = supabase
+        .from('products')
+        .select('*', { count: 'exact' });
+
+      // Try to filter by type, but handle case where column is missing
+      if (mode) {
+        query = query.eq('type', mode);
       }
-      setProducts(productsData);
-      setLoading(false);
-    }, (error) => {
-      setLoading(false);
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
 
-    return () => unsubscribe();
-  }, [mode]);
+      query = query
+        .gte('price', priceRange[0])
+        .lte('price', priceRange[1])
+        .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
+
+      if (selectedCategory) {
+        query = query.eq('category', selectedCategory);
+      }
+
+      if (selectedBrands.length > 0) {
+        query = query.in('brand', selectedBrands);
+      }
+
+      if (searchQuery) {
+        query = query.or(`name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,article.ilike.%${searchQuery}%`);
+      }
+
+      const { data, error, count } = await query;
+
+      if (error) {
+        // If the error is about a missing column, try fetching without the type filter
+        if (error.message?.includes('column') && error.message?.includes('type')) {
+          console.warn('Type column missing, falling back to non-filtered query');
+          const fallbackQuery = supabase
+            .from('products')
+            .select('*', { count: 'exact' })
+            .gte('price', priceRange[0])
+            .lte('price', priceRange[1])
+            .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
+          
+          const { data: fallbackData, error: fallbackError, count: fallbackCount } = await fallbackQuery;
+          if (fallbackError) throw fallbackError;
+          
+          if (fallbackData) {
+            const mappedData = fallbackData.map(item => ({
+              ...item,
+              image: item.image_url || item.image || '',
+              type: item.type || 'auto'
+            })) as Product[];
+
+            if (isInitial) setProducts(mappedData);
+            else setProducts(prev => [...prev, ...mappedData]);
+
+            setHasMore(fallbackData.length === ITEMS_PER_PAGE);
+            if (fallbackCount !== null) setTotalCount(fallbackCount);
+          }
+          return;
+        }
+        throw error;
+      }
+
+      if (data) {
+        const mappedData = data.map(item => ({
+          ...item,
+          image: item.image_url || item.image || '',
+          type: item.type || 'auto'
+        })) as Product[];
+
+        if (isInitial) {
+          setProducts(mappedData);
+        } else {
+          setProducts(prev => [...prev, ...mappedData]);
+        }
+
+        setHasMore(data.length === ITEMS_PER_PAGE);
+        if (count !== null) setTotalCount(count);
+      }
+    } catch (error) {
+      console.error('Error fetching products from Supabase:', error);
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  };
 
   useEffect(() => {
-    setVisibleCount(50);
-  }, [searchQuery, selectedCategory, priceRange, selectedBrands]);
+    setPage(0);
+    fetchProducts(0, true);
+  }, [mode, searchQuery, selectedCategory, priceRange, selectedBrands]);
 
-  const availableBrands = Array.from(new Set(products.map(p => p.brand).filter(Boolean))) as string[];
+  const loadMore = () => {
+    const nextPage = page + 1;
+    setPage(nextPage);
+    fetchProducts(nextPage);
+  };
 
-  const filteredProducts = products.filter(product => {
-    const matchesSearch = product.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         product.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         (product.brand && product.brand.toLowerCase().includes(searchQuery.toLowerCase()));
-    const matchesCategory = !selectedCategory || product.category === selectedCategory;
-    const matchesPrice = product.price >= priceRange[0] && product.price <= priceRange[1];
-    const matchesBrand = selectedBrands.length === 0 || (product.brand && selectedBrands.includes(product.brand));
-    
-    return matchesSearch && matchesCategory && matchesPrice && matchesBrand;
-  });
+  // Keep availabe brands logic or fetch them separately from Supabase for efficiency
+  const [availableBrands, setAvailableBrands] = useState<string[]>([]);
+  
+  useEffect(() => {
+    const fetchBrands = async () => {
+      const { data } = await supabase
+        .from('products')
+        .select('brand')
+        .eq('type', mode)
+        .not('brand', 'is', null);
+      
+      if (data) {
+        const brands = Array.from(new Set(data.map(d => d.brand))).filter(Boolean) as string[];
+        setAvailableBrands(brands);
+      }
+    };
+    fetchBrands();
+  }, [mode]);
 
   return (
     <main>
@@ -65,46 +147,45 @@ export const HomePage: React.FC = () => {
       
       <section id="products" className="py-12 bg-white dark:bg-black transition-colors relative">
         <div className="container mx-auto px-4">
-          <div className="flex flex-col md:flex-row items-baseline justify-between mb-8 md:mb-12 gap-6">
-            <div>
-              <h2 className="text-3xl md:text-4xl font-black text-gray-900 dark:text-white tracking-tight mb-1">
-                {selectedCategory || 'Всі товари'}
+          <div className="flex flex-col md:flex-row items-center justify-between mb-8 md:mb-16 gap-8">
+            <div className="text-center md:text-left w-full md:w-auto">
+              <h2 className="text-3xl md:text-5xl font-black text-gray-900 dark:text-white tracking-tighter mb-2">
+                {selectedCategory || (mode === 'auto' ? 'Автотовари' : 'Сантехніка')}
               </h2>
-              <p className="text-xs md:text-sm font-medium text-gray-400">
-                Знайдено <span className="text-gray-900 dark:text-white">{filteredProducts.length}</span> товарів
+              <p className="text-xs md:text-base font-bold text-gray-400 flex items-center justify-center md:justify-start gap-2">
+                <span className="inline-block w-2 h-2 rounded-full bg-blue-600 animate-pulse"></span>
+                В базі <span className="text-gray-900 dark:text-white font-black">{totalCount}</span> пропозицій
               </p>
             </div>
             
-            <div className="flex items-center gap-2 w-full md:w-auto overflow-x-auto pb-2 md:pb-0 no-scrollbar">
+            <div className="flex items-center gap-3 w-full md:w-auto sticky top-20 md:relative z-40 py-2 bg-white/70 dark:bg-black/70 backdrop-blur-xl md:bg-transparent md:backdrop-blur-none px-1 rounded-2xl">
               <button 
                 data-filter-trigger
                 onClick={() => setIsFilterOpen(true)}
-                className="hidden md:flex items-center space-x-2 px-4 py-2.5 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-xl text-gray-600 dark:text-gray-400 font-bold hover:text-blue-600 hover:border-blue-100 hover:bg-blue-50/30 transition-all shadow-sm active:scale-95"
+                className="flex items-center space-x-2 px-4 py-3 bg-white dark:bg-gray-900 border-2 border-gray-100 dark:border-gray-800 rounded-2xl text-gray-600 dark:text-gray-400 font-black hover:text-blue-600 hover:border-blue-100 hover:bg-blue-50 transition-all active:scale-95 shadow-sm"
               >
-                <SlidersHorizontal size={16} />
-                <span className="text-sm">Фільтри</span>
+                <SlidersHorizontal size={18} />
+                <span className="text-xs uppercase tracking-widest hidden sm:inline">Фільтри</span>
               </button>
 
-              <div className="h-8 w-[1px] bg-gray-200 dark:bg-gray-800 mx-1 hidden md:block" />
-
-              <div className="flex bg-gray-100/50 dark:bg-gray-800/50 p-1 rounded-xl border border-gray-200/50 dark:border-gray-700/50 w-full md:w-auto">
+              <div className="flex-1 md:flex-none flex bg-gray-100 dark:bg-gray-800 p-1 rounded-2xl border border-gray-200 dark:border-gray-700">
                 <button
                   onClick={() => setMode('auto')}
-                  className={`flex-1 md:flex-none flex items-center justify-center space-x-2 px-4 py-2 rounded-lg font-bold transition-all ${
-                    mode === 'auto' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                  className={`flex-1 md:flex-none flex items-center justify-center space-x-3 px-6 py-2.5 rounded-xl font-black transition-all ${
+                    mode === 'auto' ? 'bg-white dark:bg-gray-700 shadow-md text-blue-600 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  <Car size={16} />
-                  <span className="text-sm">Авто</span>
+                  <Car size={18} strokeWidth={mode === 'auto' ? 2.5 : 2} />
+                  <span className="text-xs uppercase tracking-widest">Авто</span>
                 </button>
                 <button
                   onClick={() => setMode('plumbing')}
-                  className={`flex-1 md:flex-none flex items-center justify-center space-x-2 px-4 py-2 rounded-lg font-bold transition-all ${
-                    mode === 'plumbing' ? 'bg-white dark:bg-gray-700 shadow-sm text-blue-600 dark:text-blue-400' : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300'
+                  className={`flex-1 md:flex-none flex items-center justify-center space-x-3 px-6 py-2.5 rounded-xl font-black transition-all ${
+                    mode === 'plumbing' ? 'bg-white dark:bg-gray-700 shadow-md text-blue-600 dark:text-blue-400' : 'text-gray-500 hover:text-gray-700'
                   }`}
                 >
-                  <Droplets size={16} />
-                  <span className="text-sm">Сантехніка</span>
+                  <Droplets size={18} strokeWidth={mode === 'plumbing' ? 2.5 : 2} />
+                  <span className="text-xs uppercase tracking-widest">Сантехніка</span>
                 </button>
               </div>
             </div>
@@ -126,32 +207,51 @@ export const HomePage: React.FC = () => {
             ) : (
               <>
                 <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8">
-                  {filteredProducts.slice(0, visibleCount).map(product => (
+                  {products.map(product => (
                     <ProductCard key={product.id} product={product} />
                   ))}
                 </div>
                 
-                {filteredProducts.length > visibleCount && (
+                {hasMore && (
                   <div className="mt-16 flex justify-center">
                     <button
-                      onClick={() => setVisibleCount(prev => prev + 50)}
-                      className="px-8 py-4 bg-gray-900 text-white font-bold rounded-2xl hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-gray-200/50 flex items-center gap-3"
+                      onClick={loadMore}
+                      disabled={loadingMore}
+                      className="px-8 py-4 bg-gray-900 text-white font-bold rounded-2xl hover:bg-blue-600 transition-all active:scale-95 shadow-lg shadow-gray-200/50 flex items-center gap-3 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      <Package size={20} />
-                      Показати ще 50 товарів
+                      {loadingMore ? (
+                        <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      ) : (
+                        <Package size={20} />
+                      )}
+                      Показати ще товарів
                     </button>
                   </div>
                 )}
               </>
             )}
             
-            {!loading && filteredProducts.length === 0 && (
+            {!loading && products.length === 0 && (
               <div className="text-center py-24 bg-gray-50 dark:bg-gray-900 rounded-[32px] border border-dashed border-gray-200 dark:border-gray-800">
                 <div className="text-gray-400 mb-4">
                   <Package size={48} className="mx-auto opacity-20" />
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Нічого не знайдено</h3>
-                <p className="text-gray-500 dark:text-gray-400">Спробуйте змінити параметри пошуку або фільтри</p>
+                <p className="text-gray-500 dark:text-gray-400 mb-6">Спробуйте змінити параметри пошуку або фільтри</p>
+                {isAdmin && (
+                  <div className="flex flex-col items-center gap-4">
+                    <p className="text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-lg">
+                      Ви адмін: можливо, потрібно знову запустити синхронізацію після оновлення формату даних.
+                    </p>
+                    <Link 
+                      to="/admin" 
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all active:scale-95"
+                    >
+                      Перейти в Адмін-панель
+                      <ArrowRight size={18} />
+                    </Link>
+                  </div>
+                )}
               </div>
             )}
           </div>

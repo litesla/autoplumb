@@ -3,8 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import { Package, Truck, CheckCircle, Clock, MapPin, Phone } from 'lucide-react';
 import { Order } from '../lib/utils';
 import { motion } from 'motion/react';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 
 export const OrderTrackingPage: React.FC = () => {
   const { id } = useParams();
@@ -13,24 +12,45 @@ export const OrderTrackingPage: React.FC = () => {
 
   useEffect(() => {
     if (!id) return;
-    const path = `orders/${id}`;
     
-    const unsubscribe = onSnapshot(doc(db, 'orders', id), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
+    const fetchOrder = async () => {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('id', id)
+        .single();
+      
+      if (data) {
         setOrder({
-          id: docSnap.id,
           ...data,
           items: typeof data.items === 'string' ? JSON.parse(data.items) : data.items
         } as Order);
       }
       setLoading(false);
-    }, (error) => {
-      setLoading(false);
-      handleFirestoreError(error, OperationType.GET, path);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchOrder();
+
+    const channel = supabase
+      .channel(`order_tracking_${id}`)
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'orders',
+        filter: `id=eq.${id}`
+      }, payload => {
+        if (payload.new) {
+          setOrder({
+            ...payload.new,
+            items: typeof payload.new.items === 'string' ? JSON.parse(payload.new.items) : payload.new.items
+          } as Order);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [id]);
 
   if (loading) return <div className="min-h-screen flex items-center justify-center">Завантаження...</div>;

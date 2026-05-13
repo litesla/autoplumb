@@ -2,8 +2,8 @@ import React, { useState } from 'react';
 import { useCart } from '../context/CartContext';
 import { useNavigate, Link } from 'react-router-dom';
 import { Truck, CreditCard, Phone, MapPin } from 'lucide-react';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, doc, getDoc, setDoc } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
+import { auth } from '../lib/firebase';
 
 export const CheckoutPage: React.FC = () => {
   const { items, total, clearCart } = useCart();
@@ -23,25 +23,24 @@ export const CheckoutPage: React.FC = () => {
       return;
     }
     setLoading(true);
-    const path = 'orders';
     
     try {
-      const orderData = {
+      const { data, error } = await supabase.from('orders').insert({
         items: JSON.stringify(items),
         total_price: total,
         phone: formData.phone,
         delivery_address: formData.address,
         status: 'pending',
-        user_id: auth.currentUser?.uid || null,
-        created_at: serverTimestamp()
-      };
+        user_id: auth.currentUser?.uid || null
+      }).select().single();
 
-      const docRef = await addDoc(collection(db, path), orderData);
+      if (error) throw error;
 
       clearCart();
-      navigate(`/order-tracking/${docRef.id}`);
+      navigate(`/order-tracking/${data.id}`);
     } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, path);
+      console.error('Error creating order:', err);
+      alert('Помилка при створенні замовлення');
     } finally {
       setLoading(false);
     }

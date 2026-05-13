@@ -42,16 +42,16 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
       
       <div className="p-3 md:p-6 flex flex-col flex-1">
         {product.brand && (
-          <div className="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-blue-600/60 dark:text-blue-400/60 mb-0.5 md:mb-1">
+          <div className="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-blue-600/60 dark:text-blue-400/60 mb-1">
             {product.brand}
           </div>
         )}
-        <h3 className="text-sm md:text-lg font-bold text-gray-900 dark:text-white mb-1 md:mb-2 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 min-h-[2.5rem] md:min-h-[3.5rem]">
+        <h3 className="text-sm md:text-lg font-bold text-gray-900 dark:text-white mb-2 md:mb-3 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-tight md:leading-snug min-h-[2.5rem] md:min-h-[3.5rem]">
           {product.name}
         </h3>
-        <div className="flex items-center justify-between mt-auto">
-          <div className="text-sm md:text-xl font-black text-gray-900 dark:text-white">
-            {product.price.toLocaleString()} грн
+        <div className="flex items-center justify-between mt-auto gap-2">
+          <div className="text-base md:text-xl font-black text-gray-900 dark:text-white shrink-0">
+            {product.price.toLocaleString()} <span className="text-[10px] md:text-xs">грн</span>
           </div>
           
           <button 
@@ -60,9 +60,10 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
               e.stopPropagation();
               addItem(product);
             }}
-            className="p-2.5 bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white rounded-xl active:scale-90 transition-all hover:bg-blue-600 hover:text-white"
+            className="p-3 md:p-2.5 bg-blue-600 text-white md:bg-gray-50 md:dark:bg-gray-800 md:text-gray-900 md:dark:text-white rounded-xl active:scale-95 transition-all shadow-lg shadow-blue-600/20 md:shadow-none"
           >
-            <ShoppingCart size={18} />
+            <ShoppingCart size={20} className="md:hidden" />
+            <ShoppingCart size={18} className="hidden md:block" />
           </button>
         </div>
         

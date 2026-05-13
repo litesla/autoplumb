@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { doc, getDoc, collection, query, where, limit, getDocs } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
+import { supabase } from '../lib/supabaseClient';
 import { Product } from '../lib/utils';
 import { useCart } from '../context/CartContext';
 import { ShoppingCart, ChevronLeft, ChevronRight, ArrowLeft, Package, ShieldCheck, Truck, Sparkles } from 'lucide-react';
@@ -21,17 +20,20 @@ const ProductPage: React.FC = () => {
   useEffect(() => {
     const fetchProduct = async () => {
       if (!id) return;
-      const path = `products/${id}`;
       try {
-        const docRef = doc(db, 'products', id);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const productData = { id: docSnap.id, ...docSnap.data() } as Product;
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', id)
+          .single();
+        
+        if (data) {
+          const productData = { ...data, image: data.image_url } as Product;
           setProduct(productData);
-          fetchRecommended(productData.category, docSnap.id);
+          fetchRecommended(productData.category, data.id);
         }
       } catch (error) {
-        handleFirestoreError(error, OperationType.GET, path);
+        console.error("Error fetching product:", error);
       } finally {
         setLoading(false);
       }
@@ -39,16 +41,17 @@ const ProductPage: React.FC = () => {
 
     const fetchRecommended = async (category: string, currentId: string) => {
       try {
-        const q = query(
-          collection(db, 'products'),
-          where('category', '==', category),
-          limit(12)
-        );
-        const querySnapshot = await getDocs(q);
-        const productsData = querySnapshot.docs
-          .map(doc => ({ id: doc.id, ...doc.data() } as Product))
-          .filter(p => p.id !== currentId);
-        setRecommendedProducts(productsData);
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .eq('category', category)
+          .neq('id', currentId)
+          .limit(12);
+        
+        if (data) {
+          const productsData = data.map(doc => ({ ...doc, image: doc.image_url } as Product));
+          setRecommendedProducts(productsData);
+        }
       } catch (error) {
         console.error("Error fetching recommended products:", error);
       }

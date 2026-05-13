@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { doc, getDoc, collection, query, limit, getDocs, where } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 import { motion } from 'motion/react';
 import { Calendar, User, Clock, ArrowLeft, Share2, Bookmark, Facebook, Twitter, Link as LinkIcon, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
@@ -18,37 +17,33 @@ export const ArticlePage: React.FC = () => {
     if (!id) return;
 
     const fetchPost = async () => {
-      const postPath = `blog/${id}`;
       try {
-        const docRef = doc(db, 'blog', id);
-        const docSnap = await getDoc(docRef);
+        const { data, error } = await supabase
+          .from('blog')
+          .select('*')
+          .eq('id', id)
+          .single();
         
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const postData = {
-            id: docSnap.id,
-            ...data,
-            createdAt: data.createdAt?.toDate?.()?.toISOString() || new Date().toISOString()
-          } as BlogPost;
+        if (data) {
+          const postData = data as unknown as BlogPost;
           setPost(postData);
           
           // Fetch related posts
-          const q = query(
-            collection(db, 'blog'),
-            where('category', '==', postData.category),
-            limit(4)
-          );
-          const relatedSnap = await getDocs(q);
-          setRelatedPosts(relatedSnap.docs
-            .map(d => ({ id: d.id, ...d.data() } as BlogPost))
-            .filter(p => p.id !== id)
-            .slice(0, 3)
-          );
+          const { data: related } = await supabase
+            .from('blog')
+            .select('*')
+            .eq('category', postData.category)
+            .neq('id', id)
+            .limit(3);
+          
+          if (related) {
+            setRelatedPosts(related as unknown as BlogPost[]);
+          }
         } else {
           navigate('/blog');
         }
       } catch (err) {
-        handleFirestoreError(err, OperationType.GET, postPath);
+        console.error('Error fetching blog post:', err);
       } finally {
         setLoading(false);
       }

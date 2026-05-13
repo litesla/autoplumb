@@ -20,36 +20,64 @@ import { BlogPage } from './pages/BlogPage';
 import { ArticlePage } from './pages/ArticlePage';
 import ProductPage from './pages/ProductPage';
 import { WelcomeModal } from './components/WelcomeModal';
-import { AIConsultant } from './components/AIConsultant';
 import { useNavigate, Link } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Package, Settings as SettingsIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-
 import { BottomNav } from './components/BottomNav';
 import { MaintenanceBanner } from './components/MaintenanceBanner';
-import { db } from './lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { supabase } from './lib/supabaseClient';
 import { useAuth } from './context/AuthContext';
-import { Settings } from 'lucide-react';
 
 const AppContent = () => {
   const [isCartOpen, setIsCartOpen] = useState(false);
-  const [isAIOpen, setIsAIOpen] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [isMaintenance, setIsMaintenance] = useState(false);
+  const [isQuotaExceeded, setIsQuotaExceeded] = useState(false);
   const { isAdmin } = useAuth();
   const headerRef = React.useRef<{ openSearch: () => void; openMobileMenu: () => void }>(null);
   const navigate = useNavigate();
 
   React.useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'content', 'settings'), (doc) => {
-      if (doc.exists()) {
-        setIsMaintenance(doc.data().maintenanceMode || false);
-      }
-    });
+    const handleQuota = () => setIsQuotaExceeded(true);
+    window.addEventListener('firestore-quota-exceeded', handleQuota);
+    return () => window.removeEventListener('firestore-quota-exceeded', handleQuota);
+  }, []);
 
-    return () => unsub();
+  React.useEffect(() => {
+    // Migrate settings to Supabase
+    const fetchSettings = async () => {
+      const { data } = await supabase
+        .from('content')
+        .select('*')
+        .eq('key', 'settings')
+        .single();
+      
+      if (data) {
+        setIsMaintenance(data.value?.maintenanceMode || false);
+      }
+    };
+
+    fetchSettings();
+
+    // Subscribe to changes
+    const channel = supabase
+      .channel('app_settings')
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'content',
+        filter: 'key=eq.settings'
+      }, payload => {
+        if (payload.new) {
+          setIsMaintenance((payload.new as any).value?.maintenanceMode || false);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   React.useEffect(() => {
@@ -74,7 +102,7 @@ const AppContent = () => {
       <div className="min-h-screen bg-white dark:bg-black flex items-center justify-center p-6 text-center">
         <div className="max-w-md space-y-8">
           <div className="w-24 h-24 bg-blue-100 dark:bg-blue-900/30 text-blue-600 rounded-3xl flex items-center justify-center mx-auto mb-8 animate-bounce">
-            <Settings size={48} />
+            <SettingsIcon size={48} />
           </div>
           <div className="space-y-4">
             <h1 className="text-4xl font-black text-gray-900 dark:text-white">Технічне обслуговування</h1>
@@ -109,6 +137,18 @@ const AppContent = () => {
   return (
     <div className="min-h-screen bg-white dark:bg-black font-['Inter',sans-serif] transition-colors duration-300">
       <div className="sticky top-0 z-[110]">
+          {isQuotaExceeded && (
+            <div className="bg-red-600 text-white py-3 px-4 text-center text-sm font-black flex items-center justify-center gap-3 animate-slide-in">
+              <Package size={18} />
+              Вичерпано добовий ліміт запитів (Firestore Quota). Товари можуть тимчасово не відображатися.
+              <button 
+                onClick={() => setIsQuotaExceeded(false)}
+                className="ml-4 opacity-50 hover:opacity-100"
+              >
+                ✕
+              </button>
+            </div>
+          )}
           <MaintenanceBanner />
           <Header 
             ref={headerRef}
@@ -149,7 +189,6 @@ const AppContent = () => {
 
         <BottomNav 
           onCartOpen={() => setIsCartOpen(prev => !prev)}
-          onAIOpen={() => setIsAIOpen(true)}
           onCategoriesOpen={() => headerRef.current?.openMobileMenu()}
         />
 
@@ -184,7 +223,6 @@ const AppContent = () => {
           </div>
         </footer>
         <WelcomeModal />
-        <AIConsultant isOpen={isAIOpen} onClose={() => setIsAIOpen(false)} />
     </div>
   );
 };

@@ -1,20 +1,43 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { db } from '../lib/firebase';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 import { AlertCircle, Truck } from 'lucide-react';
 
 export const MaintenanceBanner: React.FC = () => {
   const [techBannerMode, setTechBannerMode] = useState(false);
 
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, 'content', 'settings'), (doc) => {
-      if (doc.exists()) {
-        setTechBannerMode(doc.data().techBannerMode || false);
+    const fetchSettings = async () => {
+      const { data } = await supabase
+        .from('content')
+        .select('*')
+        .eq('key', 'settings')
+        .single();
+      
+      if (data) {
+        setTechBannerMode(data.value?.techBannerMode || false);
       }
-    });
+    };
 
-    return () => unsub();
+    fetchSettings();
+
+    const channel = supabase
+      .channel('tech_banner_settings')
+      .on('postgres_changes', { 
+        event: 'UPDATE', 
+        schema: 'public', 
+        table: 'content',
+        filter: 'key=eq.settings'
+      }, payload => {
+        if (payload.new) {
+          setTechBannerMode((payload.new as any).value?.techBannerMode || false);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   return (

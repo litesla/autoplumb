@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { useWishlist } from '../context/WishlistContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, query, where, onSnapshot, orderBy, doc, getDoc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { useShop } from '../context/ShopContext';
+import { supabase } from '../lib/supabaseClient';
 import { motion, AnimatePresence } from 'motion/react';
 import { User, ShoppingBag, Heart, MapPin, LogOut, ChevronRight, Package, Clock, CheckCircle, Truck, XCircle, Award, Sparkles, Phone, Mail, Save, Plus, Trash2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Order, Product } from '../lib/utils';
+import { useAuth } from '../context/AuthContext';
+import { useWishlist } from '../context/WishlistContext';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
 
@@ -43,47 +43,42 @@ export const ProfilePage: React.FC = () => {
 
   useEffect(() => {
     if (user) {
-      // Fetch orders
-      const ordersPath = 'orders';
-      const q = query(
-        collection(db, ordersPath),
-        where('user_id', '==', user.uid),
-        orderBy('created_at', 'desc')
-      );
-
-      const unsubOrders = onSnapshot(q, (snapshot) => {
-        setOrders(snapshot.docs.map(doc => {
-          const data = doc.data();
-          return {
-            id: doc.id,
-            ...data,
-            items: typeof data.items === 'string' ? JSON.parse(data.items) : data.items,
-            created_at: data.created_at?.toDate?.()?.toISOString() || new Date().toISOString()
-          };
-        }) as Order[]);
+      const fetchOrders = async () => {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('user_id', user.uid)
+          .order('created_at', { ascending: false });
+        
+        if (data) {
+          setOrders(data.map(o => ({
+            ...o,
+            items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items
+          })) as Order[]);
+        }
         setLoading(false);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, ordersPath);
-        setLoading(false);
-      });
+      };
 
-      // Fetch profile
+      fetchOrders();
+
       const fetchProfile = async () => {
-        const profilePath = `user_profiles/${user.uid}`;
-        try {
-          const docRef = doc(db, 'user_profiles', user.uid);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            setProfile(docSnap.data() as UserProfile);
-          }
-        } catch (err) {
-          handleFirestoreError(err, OperationType.GET, profilePath);
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', user.uid)
+          .single();
+        
+        if (data) {
+          setProfile({
+            fullName: data.full_name || '',
+            phone: data.phone || '',
+            address: data.address || '',
+            savedAddresses: data.saved_addresses || []
+          });
         }
       };
 
       fetchProfile();
-
-      return () => unsubOrders();
     }
   }, [user]);
 
@@ -91,15 +86,19 @@ export const ProfilePage: React.FC = () => {
     e.preventDefault();
     if (!user) return;
 
-    const profilePath = `user_profiles/${user.uid}`;
     try {
-      await setDoc(doc(db, 'user_profiles', user.uid), {
-        ...profile,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      const { error } = await supabase.from('user_profiles').upsert({
+        id: user.uid,
+        full_name: profile.fullName,
+        phone: profile.phone,
+        address: profile.address,
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
       setIsEditingProfile(false);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, profilePath);
+      console.error('Error saving profile:', err);
+      alert('Помилка при збереженні профілю');
     }
   };
 
@@ -107,32 +106,35 @@ export const ProfilePage: React.FC = () => {
     if (!newAddress.trim() || !user) return;
     
     const updatedAddresses = [...(profile.savedAddresses || []), newAddress.trim()];
-    const profilePath = `user_profiles/${user.uid}`;
     try {
-      await setDoc(doc(db, 'user_profiles', user.uid), {
-        savedAddresses: updatedAddresses,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      const { error } = await supabase.from('user_profiles').upsert({
+        id: user.uid,
+        saved_addresses: updatedAddresses,
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
       setProfile({ ...profile, savedAddresses: updatedAddresses });
       setNewAddress('');
       setIsAddingAddress(false);
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, profilePath);
+      console.error('Error adding address:', err);
+      alert('Помилка при додаванні адреси');
     }
   };
 
   const handleDeleteAddress = async (index: number) => {
     if (!user) return;
     const updatedAddresses = profile.savedAddresses.filter((_, i) => i !== index);
-    const profilePath = `user_profiles/${user.uid}`;
     try {
-      await setDoc(doc(db, 'user_profiles', user.uid), {
-        savedAddresses: updatedAddresses,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
+      const { error } = await supabase.from('user_profiles').upsert({
+        id: user.uid,
+        saved_addresses: updatedAddresses,
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
       setProfile({ ...profile, savedAddresses: updatedAddresses });
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, profilePath);
+      console.error('Error deleting address:', err);
     }
   };
 

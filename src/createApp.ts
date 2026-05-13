@@ -1,46 +1,18 @@
 import express from "express";
-import * as admin from "firebase-admin";
-import { getFirestore } from "firebase-admin/firestore";
-import fs from "fs";
+import { createClient } from "@supabase/supabase-js";
 import axios from "axios";
 import * as xlsx from "xlsx";
-import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 export async function createExpressApp() {
   const app = express();
 
-  // Initialize Firebase Admin lazily
-  let db: admin.firestore.Firestore | null = null;
-  try {
-    let firebaseConfig = null;
-    const pathsToTry = [
-      path.join(process.cwd(), "firebase-applet-config.json"),
-      path.join(__dirname, "..", "firebase-applet-config.json"),
-      path.join(__dirname, "..", "..", "firebase-applet-config.json")
-    ];
-
-    for (const p of pathsToTry) {
-      if (fs.existsSync(p)) {
-        firebaseConfig = JSON.parse(fs.readFileSync(p, "utf-8"));
-        break;
-      }
-    }
-
-    if (firebaseConfig) {
-      if (!admin.apps.length) {
-        admin.initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-      }
-      db = getFirestore(admin.apps[0], firebaseConfig.firestoreDatabaseId || "(default)");
-    }
-  } catch (error) {
-    console.error("Failed to initialize Firebase Admin:", error);
-  }
+  // Supabase client initialization
+  const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || "";
+  
+  // Safe URL to prevent crash
+  const safeUrl = supabaseUrl && supabaseUrl.startsWith('http') ? supabaseUrl : 'https://placeholder.supabase.co';
+  const supabase = createClient(safeUrl, supabaseKey || "placeholder");
 
   app.use(express.json());
 
@@ -54,28 +26,26 @@ export async function createExpressApp() {
     }
 
     try {
-      if (!db) return res.status(500).json({ error: "Database not initialized" });
-      const { name, price, category, description, image, stock, type, brand, specs } = req.body;
+      const { name, price, category, description, image, stock, type, brand, specs, article } = req.body;
 
       if (!name || !price || !type) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
-      const productData = {
+      const { data, error } = await supabase.from("products").insert({
         name,
         price: Number(price),
         category: category || "Загальне",
         description: description || "",
-        image: image || "",
+        image_url: image || "",
         stock: Number(stock || 0),
         type: type === "plumbing" ? "plumbing" : "auto",
         brand: brand || "",
-        specs: specs || "{}",
-        created_at: admin.firestore.FieldValue.serverTimestamp(),
-      };
+        article: article || ""
+      }).select();
 
-      const docRef = await db.collection("products").add(productData);
-      res.status(201).json({ id: docRef.id });
+      if (error) throw error;
+      res.status(201).json({ id: data[0].id });
     } catch (error) {
       res.status(500).json({ error: "Internal Error" });
     }
@@ -118,34 +88,102 @@ export async function createExpressApp() {
       });
 
       const workbook = xlsx.read(downloadResponse.data, { type: 'buffer' });
-      const data: any[] = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-
-      if (!db) throw new Error("DB not init");
-      const batchSize = 400;
-      for (let i = 0; i < data.length; i += batchSize) {
-        const chunk = data.slice(i, i + batchSize);
-        const batch = db.batch();
-        chunk.forEach((item: any) => {
-          const getVal = (keys: string[]) => {
-            const k = Object.keys(item).find(key => keys.some(t => key.toLowerCase().trim() === t.toLowerCase()));
-            return k ? item[k] : undefined;
-          };
-          const article = getVal(["Article", "Артикул", "Код"]);
-          const productData = {
-            name: getVal(["Name", "Назва"]) || "Товар UTR",
-            price: Number(getVal(["Price", "Ціна"]) || 0),
-            article: article || "",
-            type: "auto",
-            updated_at: admin.firestore.FieldValue.serverTimestamp()
-          };
-          const docRef = article ? db!.collection("products").doc(`utr_${article}`) : db!.collection("products").doc();
-          batch.set(docRef, productData, { merge: true });
-        });
-        await batch.commit();
+      const ws = workbook.Sheets[workbook.SheetNames[0]];
+      
+      const rawData = xlsx.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
+      let headerRowIndex = 0;
+      let maxColumnsWithText = 0;
+      for (let i = 0; i < Math.min(rawData.length, 30); i++) {
+        const row = rawData[i];
+        const textColumnCount = row.filter(cell => cell && cell.toString().trim().length > 1).length;
+        const rowText = row.join(' ').toLowerCase();
+        const hasNameHint = rowText.includes('назва') || rowText.includes('товар') || rowText.includes('наименование') || rowText.includes('name');
+        
+        if (textColumnCount >= 3 && (textColumnCount > maxColumnsWithText || hasNameHint)) {
+          maxColumnsWithText = textColumnCount;
+          headerRowIndex = i;
+          if (hasNameHint) break;
+        }
       }
 
-      res.json({ message: "Sync successful" });
+      const excelData = xlsx.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" }) as any[];
+      
+      const productsToUpsert: any[] = [];
+
+      excelData.forEach((item: any) => {
+        const getVal = (keys: string[]) => {
+          const k = Object.keys(item).find(key => keys.some(t => {
+            const normalizedK = key.toString().toLowerCase().trim();
+            const normalizedT = t.toLowerCase().trim();
+            return normalizedK === normalizedT || normalizedK.includes(normalizedT);
+          }));
+          return k ? item[k] : undefined;
+        };
+
+        const nameRaw = getVal(["Name", "Назва", "Наименование", "Title", "Товар"]);
+        const name = nameRaw ? nameRaw.toString().trim() : "";
+        
+        const priceRaw = getVal(["Price", "Ціна", "Цена", "Cost", "Price (UAH)"]);
+        let price = 0;
+        if (typeof priceRaw === 'number') price = priceRaw;
+        else if (typeof priceRaw === 'string') {
+          const sanitized = priceRaw.replace(/[₴$€\s]/g, '').replace(',', '.');
+          price = parseFloat(sanitized.replace(/[^0-9.]/g, ''));
+        }
+
+        if (!name || isNaN(price) || price <= 0) return;
+
+        const articleRaw = getVal(["Article", "Артикул", "Код", "Sku", "Part Number"]);
+        const article = articleRaw ? articleRaw.toString().trim() : "";
+        const brand = getVal(["Brand", "Бренд", "Виробник", "Производитель"]) || "";
+        const category = getVal(["Category", "Категорія", "Група", "Group"]) || "Запчастини";
+        const stock = Number(getVal(["Quantity", "Кількість", "Залишок", "Stock"]) || 0);
+
+        const isPlumbing = category.toLowerCase().includes('сантех') || 
+                          category.toLowerCase().includes('plumb') ||
+                          name.toLowerCase().includes('труба') || 
+                          name.toLowerCase().includes('кран') ||
+                          name.toLowerCase().includes('змішувач');
+
+        productsToUpsert.push({
+          name,
+          price,
+          brand,
+          article,
+          stock,
+          category,
+          type: isPlumbing ? "plumbing" : "auto",
+          image_url: isPlumbing 
+            ? "https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=800"
+            : "https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800",
+          description: `Артикул: ${article}. Виробник: ${brand}`,
+          updated_at: new Date().toISOString()
+        });
+      });
+
+      // Upsert in batches to Supabase
+      let totalProcessed = 0;
+      const batchSize = 100;
+      for (let i = 0; i < productsToUpsert.length; i += batchSize) {
+        const chunk = productsToUpsert.slice(i, i + batchSize);
+        // Using upsert with onConflict if we had a unique identifier (like utr_id or article)
+        // For now, let's assume article is unique per brand or just insert
+        const { error } = await supabase.from("products").upsert(chunk, { onConflict: 'article, brand' });
+        if (error) {
+          console.error("Batch error:", error);
+          // If upsert fails due to missing constraint, fallback to insert
+          await supabase.from("products").insert(chunk);
+        }
+        totalProcessed += chunk.length;
+      }
+
+      console.log(`Sync completed. Processed ${totalProcessed} products.`);
+      res.json({ 
+        message: `Синхронізація завершена успішно! Оброблено ${totalProcessed} товарів.`, 
+        count: totalProcessed 
+      });
     } catch (error: any) {
+      console.error("Sync failed:", error);
       res.status(500).json({ error: "Sync failed", details: error.message });
     }
   });

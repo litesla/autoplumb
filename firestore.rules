@@ -94,10 +94,12 @@ service cloud.firestore {
     }
 
     function isValidOrder(data) {
-      return data.items is string && data.items.size() > 0 && data.items.size() < 10000 &&
+      return data.items is string && data.items.size() > 0 && data.items.size() < 20000 &&
              data.total_price is number && data.total_price >= 0 &&
-             data.phone is string && data.phone.size() >= 10 && data.phone.size() <= 20 &&
-             data.delivery_address is string && data.delivery_address.size() > 0 && data.delivery_address.size() < 1000;
+             data.phone is string && data.phone.size() >= 7 && data.phone.size() <= 30 &&
+             data.delivery_address is string && data.delivery_address.size() > 0 && data.delivery_address.size() < 2000 &&
+             data.status == "pending" &&
+             data.created_at == request.time;
     }
 
     function isValidReview(data) {
@@ -125,7 +127,7 @@ service cloud.firestore {
     }
 
     match /orders/{orderId} {
-      allow get: if isAdmin() || (isAuthenticated() && resource.data.user_id == request.auth.uid) || resource.data.user_id == null;
+      allow get: if true;
       allow list: if isAdmin() || (isAuthenticated() && resource.data.user_id == request.auth.uid);
       allow create: if isValidOrder(request.resource.data) && 
                       (request.resource.data.get('user_id', null) == (request.auth == null ? null : request.auth.uid));

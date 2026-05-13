@@ -4,9 +4,9 @@ let genAI: GoogleGenAI | null = null;
 
 function getGenAI() {
   if (!genAI) {
-    const apiKey = import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey || apiKey === "undefined") {
-      throw new Error("GEMINI_API_KEY (VITE_GEMINI_API_KEY) is not configured. Please set it in Netlify environment variables.");
+      throw new Error("GEMINI_API_KEY is not configured.");
     }
     genAI = new GoogleGenAI({ apiKey });
   }
@@ -46,7 +46,7 @@ export async function getColumnMapping(sampleData: any[]): Promise<ColumnMapping
 
     const ai = getGenAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         responseMimeType: "application/json",
@@ -96,7 +96,7 @@ export async function getGeminiResponse(prompt: string, products: any[]) {
 
     const ai = getGenAI();
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-flash-latest",
       contents: prompt,
       config: {
         systemInstruction: systemInstruction,

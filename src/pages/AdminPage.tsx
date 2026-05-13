@@ -7,8 +7,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, getDoc, setDoc, serverTimestamp, writeBatch, limit, getCountFromServer, where, getDocs } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 import { getColumnMapping, ColumnMapping } from '../services/geminiService';
 
 export const AdminPage: React.FC = () => {
@@ -27,16 +26,22 @@ export const AdminPage: React.FC = () => {
   const [editingPost, setEditingPost] = useState<BlogPost | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isConfirmingDeleteAll, setIsConfirmingDeleteAll] = useState(false);
+  const [isConfirmingRegularImport, setIsConfirmingRegularImport] = useState(false);
   const [postToDelete, setPostToDelete] = useState<BlogPost | null>(null);
   const [selectedProducts, setSelectedProducts] = useState<(string | number)[]>([]);
   const [heroContent, setHeroContent] = useState<any>(null);
   const [isSyncingUTR, setIsSyncingUTR] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
+  const [importStats, setImportStats] = useState({ current: 0, total: 0 });
+  const [importStatus, setImportStatus] = useState<string>('');
   const [deleteProgressStats, setDeleteProgressStats] = useState({ current: 0, total: 0 });
   const [shouldStopDeletion, setShouldStopDeletion] = useState(false);
+  const [shouldStopImport, setShouldStopImport] = useState(false);
+  const stopImportRef = React.useRef(false);
   const [isAiMapping, setIsAiMapping] = useState(false);
   const [pendingImportData, setPendingImportData] = useState<any[] | null>(null);
+  const [pendingProductsToImport, setPendingProductsToImport] = useState<any[]>([]);
   const [detectedMapping, setDetectedMapping] = useState<ColumnMapping | null>(null);
   const [newProduct, setNewProduct] = useState({
     name: '',
@@ -71,77 +76,48 @@ export const AdminPage: React.FC = () => {
     notifications: true
   });
 
-  useEffect(() => {
-    if (isAdmin) {
-      const productsPath = 'products';
-      
-      // Get total count efficiently
-      getCountFromServer(collection(db, productsPath)).then(snapshot => {
-        setTotalProductsCount(snapshot.data().count);
-      });
+  const refreshAllData = async () => {
+    if (!isAdmin) return;
+    
+    try {
+      const [{ count }, { data: pData }, { data: oData }, { data: bData }] = await Promise.all([
+        supabase.from('products').select('*', { count: 'exact', head: true }),
+        supabase.from('products').select('*').order('created_at', { ascending: false }).limit(100),
+        supabase.from('orders').select('*').order('created_at', { ascending: false }),
+        supabase.from('blog').select('*').order('created_at', { ascending: false })
+      ]);
 
-      // Optimized real-time listener for products (defaults to 100 recent)
-      let productQuery;
-      if (productSearch) {
-        // Simple search by article or prefix if possible? 
-        // Firestore doesn't support easy case-insensitive substring search without third party.
-        // We'll stick to a slightly larger limit but non-real-time search or just keep it simple.
-        productQuery = query(collection(db, productsPath), limit(1000));
-      } else {
-        productQuery = query(collection(db, productsPath), orderBy('created_at', 'desc'), limit(100));
+      if (count !== null) setTotalProductsCount(count);
+      
+      if (pData) {
+        setProducts(pData.map(item => ({ 
+          ...item, 
+          image: item.image_url || item.image || '',
+          type: item.type || 'auto' // Fallback for products without type
+        })) as Product[]);
       }
 
-      const unsubProducts = onSnapshot(productQuery, (snapshot) => {
-        const productsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as Product[];
-        setProducts(productsData);
-        
-        // Seed initial data if empty (only check if count was 0)
-        if (productsData.length === 0 && totalProductsCount === 0) {
-          // Double check with actual count to be sure
-          getCountFromServer(collection(db, productsPath)).then(snap => {
-            if (snap.data().count === 0) seedInitialData();
-          });
-        }
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, productsPath);
-      });
+      if (oData) {
+        setOrders(oData.map(o => ({
+          ...o,
+          items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items
+        })) as Order[]);
+      }
 
-      const ordersPath = 'orders';
-      const unsubOrders = onSnapshot(query(collection(db, ordersPath), orderBy('created_at', 'desc')), (snapshot) => {
-        setOrders(snapshot.docs.map(doc => {
-          const data = doc.data();
-          return { 
-            id: doc.id, 
-            ...data,
-            items: typeof data.items === 'string' ? JSON.parse(data.items) : data.items,
-            created_at: data.created_at?.toDate?.()?.toISOString() || new Date().toISOString()
-          };
-        }) as Order[]);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, ordersPath);
-      });
-
-      const blogPath = 'blog';
-      const unsubBlog = onSnapshot(query(collection(db, blogPath), orderBy('createdAt', 'desc')), (snapshot) => {
-        setBlogPosts(snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || new Date().toISOString()
-        })) as BlogPost[]);
-      }, (error) => {
-        handleFirestoreError(error, OperationType.LIST, blogPath);
-      });
+      if (bData) {
+        setBlogPosts(bData as unknown as BlogPost[]);
+      }
 
       fetchSettings();
       fetchHeroContent();
-
-      return () => {
-        unsubProducts();
-        unsubOrders();
-        unsubBlog();
-      };
+    } catch (err) {
+      console.error('Error refreshing admin data:', err);
     }
-  }, [isAdmin]);
+  };
+
+  useEffect(() => {
+    refreshAllData();
+  }, [isAdmin, productSearch]);
 
   const seedInitialData = async () => {
     const initialProducts = [
@@ -159,107 +135,212 @@ export const AdminPage: React.FC = () => {
     ];
 
     for (const product of initialProducts) {
-      await addDoc(collection(db, 'products'), {
+      await supabase.from('products').insert({
         ...product,
-        created_at: serverTimestamp()
+        image_url: product.image,
+        created_at: new Date().toISOString()
       });
     }
+    alert('Товари успішно додані!');
   };
 
   const seedBlogPosts = async () => {
     const initialPosts = [
       {
-        title: 'Як вибрати акумулятор для авто: Повний гід',
-        excerpt: 'Вибір акумулятора — відповідальний крок. Ми розповімо, на що звернути увагу, щоб ваше авто заводилося в будь-який мороз.',
-        content: `## Як вибрати акумулятор для вашого автомобіля
+        title: 'Як вибрати акумулятор для авто: Повний гід 2024',
+        excerpt: 'Вибір акумулятора — відповідальний крок. Ми розповімо про ємність, пусковий струм та полярність, щоб ваше авто заводилося в будь-який мороз.',
+        content: `## Як вибрати акумулятор для вашого автомобіля: Повний гайд
 
 Вибір правильного акумулятора має вирішальне значення для надійної роботи вашого автомобіля. Ось основні фактори, які слід враховувати:
 
 ### 1. Ємність (Ah)
-Це показник того, скільки енергії може зберігати акумулятор. Перевірте посібник користувача вашого авто, щоб дізнатися рекомендовану ємність.
+Це показник того, скільки енергії може зберігати акумулятор. Перевірте посібник користувача вашого авто, щоб дізнатися рекомендовану ємність. Для легкових авто це зазвичай 55-75 Ah.
 
 ### 2. Пусковий струм (A)
-Це здатність акумулятора запускати двигун при низьких температурах. Чим вищий цей показник, тим легше буде завести авто взимку.
+Це здатність акумулятора запускати двигун при низьких температурах. Чим вищий цей показник, тим легше буде завести авто взимку. Для дизельних двигунів потрібен вищий струм.
 
-### 3. Розміри та полярність
-Переконайтеся, що новий акумулятор підходить за розміром до посадкового місця і має правильне розташування клем (пряма або зворотна полярність).
+### 3. Габарити та полярність
+Переконайтеся, що новий акумулятор підходить за розміром до посадкового місця і має правильне розташування клем. Полярність буває пряма (L+) та зворотна (R+).
 
-### 4. Бренд та гарантія
-Обирайте перевірені бренди, такі як Bosch, Varta або Exide. Вони пропонують кращу надійність та тривалу гарантію.
+### 4. Тип технології (EFB, AGM, Ca/Ca)
+*   **Ca/Ca:** Стандартні необслуговувані АКБ.
+*   **EFB:** Покращені АКБ для систем Start-Stop.
+*   **AGM:** Найвитриваліші АКБ для сучасних авто з великою кількістю електроніки.
 
-**Порада від експерта:** Завжди перевіряйте дату виготовлення. Акумулятор, який простояв на складі більше року, може втратити частину своєї ємності.`,
+**Порада від експерта:** Завжди перевіряйте дату виготовлення. Акумулятор, який простояв на складі більше року, втрачає частину характеристик.`,
         author: 'Олександр Експерт',
         category: 'Поради',
         image: 'https://images.unsplash.com/photo-1621905251189-08b45d6a269e?auto=format&fit=crop&q=80&w=800',
+        readTime: '7 хв'
+      },
+      {
+        title: '5 ознак того, що вашу сантехніку пора міняти',
+        excerpt: 'Не чекайте аварії! Розповідаємо про приховані симптоми зносу труб та змішувачів, які вбережуть вас від затоплення.',
+        content: `## Коли пора дзвонити сантехніку?
+
+Багато власників житла ігнорують дрібні несправності, поки вони не перетворюються на катастрофу. Ось 5 ознак того, що ваша сантехніка потребує оновлення:
+
+1. **Зниження тиску води:** Це може свідчити про корозію або засмічення труб всередині.
+2. **Поява іржі на з'єднаннях:** Навіть маленька пляма іржі — це майбутня дірка, яка чекає моменту, щоб лопнути.
+3. **Постійний шум у трубах:** Стук або гул при відкритті кранів часто вказує на нестабільність тиску або знос клапанів.
+4. **Неприємний запах:** Можливі проблеми з сифонами або герметичністю каналізаційних з'єднань.
+5. **Конденсат на трубах:** Надмірне запотівання труб може призвести до грибка та прискореної корозії.
+
+**Порада:** Використовуйте тільки якісні запчастини та звертайтеся до професіоналів для монтажу складних систем.`,
+        author: 'Майстер Сергій',
+        category: 'Сантехніка',
+        image: 'https://images.unsplash.com/photo-1581244277943-fe4a9c777189?auto=format&fit=crop&q=80&w=800',
         readTime: '5 хв'
       },
       {
-        title: 'Топ-5 помилок при виборі змішувача для кухні',
-        excerpt: 'Змішувач — це не тільки дизайн, а й функціональність. Уникайте цих помилок, щоб ваша кухня була зручною та стильною.',
-        content: `## Вибір змішувача для кухні: Чого не варто робити
+        title: 'Як підготувати авто до зими: Чек-лист',
+        excerpt: 'Зима — це випробування для кожного вузла автомобіля. Дізнайтеся, як перевірити антифриз, гальма та масло.',
+        content: `## Зимова підготовка: Безпека понад усе
 
-Кухня — це серце дому, а змішувач — один із найбільш використовуваних інструментів. Ось 5 поширених помилок при його виборі:
+Зима вимагає особливої уваги до технічного стану. Пройдіть по цих пунктах:
 
-1. **Невідповідність розміру мийки:** Занадто високий змішувач може створювати бризки, а занадто низький — заважати мити великі каструлі.
-2. **Ігнорування матеріалу:** Дешеві силумінові змішувачі швидко виходять з ладу. Обирайте латунь або нержавіючу сталь.
-3. **Неправильний тип кріплення:** Переконайтеся, що змішувач підходить до отвору у вашій мийці або стільниці.
-4. **Забуваєте про функціональність:** Висувний вилив значно полегшує миття овочів та самої мийки.
-5. **Економія на бренді:** Відомі виробники (Grohe, Hansgrohe) гарантують наявність запчастин навіть через 10 років.
+### Рідини
+*   **Антифриз:** Перевірте температуру замерзання. Вона має бути не вище -35°C.
+*   **Омивач:** Завчасно залийте "незамерзайка".
+*   **Олива:** Якщо наближається термін заміни, краще зробити це до морозів.
 
-Обирайте розумно, і ваша сантехніка служитиме вам роками!`,
-        author: 'Марія Дизайнер',
-        category: 'Сантехніка',
-        image: 'https://images.unsplash.com/photo-1584622650111-993a426fbf0a?auto=format&fit=crop&q=80&w=800',
+### Шини та гальма
+Зимова гума — це обов'язково. Перевірте також товщину гальмівних колодок, оскільки на слизькій дорозі гальмівний шлях збільшується.
+
+### Гумові ущільнювачі
+Обробіть дверні ущільнювачі силіконом, щоб вони не примерзали після мийки.
+
+Будьте уважні на дорогах!`,
+        author: 'АвтоЕксперт',
+        category: 'Сезонне',
+        image: 'https://images.unsplash.com/photo-1547483151-512140b077a9?auto=format&fit=crop&q=80&w=800',
+        readTime: '10 хв'
+      },
+      {
+        title: 'Ремонт змішувача: як замінити картридж самостійно',
+        excerpt: 'Покрокова інструкція з ремонту одноважільного крана, яка допоможе вам зекономити на виклику майстра.',
+        content: `## Ремонт змішувача власними руками
+
+Якщо ваш кран почав прокапувати або важко повертається важіль — скоріше за все, пора міняти картридж.
+
+### Вам знадобляться:
+*   Шестигранний ключ (2.5 мм)
+*   Розвідний ключ
+*   Викрутка
+*   Новий картридж (візьміть старий для прикладу)
+
+### Етапи:
+1. **Перекрийте воду.** Це найголовніше!
+2. Зніміть декоративну заглушку під важелем.
+3. Відкрутіть гвинт та зніміть важіль.
+4. Відкрутіть декоративний ковпачок та притискну гайку.
+5. Замініть картридж на новий.
+6. Зберіть у зворотному порядку.
+
+**Успіху!** Дрібний ремонт под силу кожному.`,
+        author: 'Майстер Олексій',
+        category: 'DIY',
+        image: 'https://images.unsplash.com/photo-1542013936-6933-884638332954?auto=format&fit=crop&q=80&w=800',
+        readTime: '6 хв'
+      },
+      {
+        title: 'Чому скриплять гальма і що з цим робити?',
+        excerpt: 'Неприємний звук при гальмуванні може бути як особливістю матеріалу, так і критичною несправністю.',
+        content: `## Розбираємося зі скрипом гальм
+
+Скрип при гальмуванні — одна з найпоширеніших скарг. Ось чому це стається:
+
+### Основні причини:
+*   **Природний знос:** Багато колодок мають металевий індикатор ("пискун"), який починає видавати звук, коли шар зношується до критичного.
+*   **Склад колодки:** Деякі недорогі колодки мають багато металевої стружки в суміші, що спричиняє скрип навіть у нових деталях.
+*   **Потрапляння бруду:** Дрібні камінці або пісок між диском і колодкою.
+*   **Перегрів:** Якщо ви часто інтенсивно гальмуєте, матеріал колодки може "засклитися".
+
+**Рішення:** Якщо скрип з'явився нещодавно, перевірте товщину колодок. Якщо вони в нормі, спробуйте промити гальмівні диски спеціальним очищувачем.`,
+        author: 'Механік Дмитро',
+        category: 'Авто',
+        image: 'https://images.unsplash.com/photo-1486262715619-67b85e0b08d3?auto=format&fit=crop&q=80&w=800',
         readTime: '4 хв'
+      },
+      {
+        title: 'Як вибрати економний радіатор опалення',
+        excerpt: 'Порівняння сталевих, чавунних та алюмінієвих радіаторів для квартири та приватного будинку.',
+        content: `## Опалення з розумом: вибираємо радіатор
+
+Вибір радіатора впливає не тільки на тепло, а й на ваші рахунки за енергоносії.
+
+### Сталеві панельні радіатори
+Ідеальні для автономного опалення. Швидко нагріваються і дозволяють точно регулювати температуру.
+
+### Алюмінієві радіатори
+Мають найвищу тепловіддачу. Легкі, але вибагливі до якості теплоносія (можуть кородувати при високому pH).
+
+### Біметалеві радіатори
+Найкращий вибір для багатоповерхівок з центральним опаленням. Сталева трубка всередині витримує високий тиск, а алюмінієва оболонка добре віддає тепло.
+
+### Чавунні радіатори
+Класика. Довго тримають тепло, але повільно нагріваються. Сучасні дизайнерські моделі виглядають приголомшливо.`,
+        author: 'Інженер Віталій',
+        category: 'Опалення',
+        image: 'https://images.unsplash.com/photo-1585131236039-5d539d1184b7?auto=format&fit=crop&q=80&w=800',
+        readTime: '8 хв'
       }
     ];
 
     for (const post of initialPosts) {
-      await addDoc(collection(db, 'blog'), {
-        ...post,
-        createdAt: serverTimestamp()
+      await supabase.from('blog').insert({
+        title: post.title,
+        excerpt: post.excerpt,
+        content: post.content,
+        author: post.author,
+        category: post.category,
+        image_url: post.image,
+        read_time: post.readTime,
+        created_at: new Date().toISOString()
       });
     }
-    alert('Блог успішно заповнено!');
+    alert('Блог успішно заповнено професійними SEO статтями!');
   };
 
   const fetchHeroContent = async () => {
-    const path = 'content/hero';
     try {
-      const docRef = doc(db, 'content', 'hero');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setHeroContent(docSnap.data());
+      const { data, error } = await supabase
+        .from('content')
+        .select('*')
+        .eq('key', 'hero')
+        .single();
+      if (data) {
+        setHeroContent(data.value);
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, path);
+      console.error('Error fetching hero content:', err);
     }
   };
 
   const handleSaveHeroContent = async () => {
-    const path = 'content/hero';
     try {
-      await setDoc(doc(db, 'content', 'hero'), heroContent);
+      const { error } = await supabase
+        .from('content')
+        .upsert({ key: 'hero', value: heroContent });
+      if (error) throw error;
       alert('Контент Hero збережено!');
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+      console.error('Error saving hero content:', err);
     }
   };
 
   const fetchSettings = async () => {
-    const path = 'content/settings';
     try {
-      const docRef = doc(db, 'content', 'settings');
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setSettings(prev => ({
-          ...prev,
-          ...data
-        }));
+      const { data, error } = await supabase
+        .from('content')
+        .select('*')
+        .eq('key', 'settings')
+        .single();
+      if (data) {
+        setSettings(prev => ({ ...prev, ...data.value }));
       }
     } catch (err) {
-      handleFirestoreError(err, OperationType.GET, path);
+      console.error('Error fetching settings:', err);
     }
   };
 
@@ -267,10 +348,10 @@ export const AdminPage: React.FC = () => {
     const newSettings = { ...settings, [key]: value };
     setSettings(newSettings);
     
-    // Auto-save toggle to Firestore
-    const path = 'content/settings';
     try {
-      await setDoc(doc(db, 'content', 'settings'), newSettings);
+      await supabase
+        .from('content')
+        .upsert({ key: 'settings', value: newSettings });
       console.log(`Setting ${key} updated to ${value}`);
     } catch (err) {
       console.error(`Error saving toggle ${key}:`, err);
@@ -278,12 +359,14 @@ export const AdminPage: React.FC = () => {
   };
 
   const handleSaveSettings = async () => {
-    const path = 'content/settings';
     try {
-      await setDoc(doc(db, 'content', 'settings'), settings);
+      const { error } = await supabase
+        .from('content')
+        .upsert({ key: 'settings', value: settings });
+      if (error) throw error;
       alert('Налаштування збережено!');
     } catch (err) {
-      handleFirestoreError(err, OperationType.WRITE, path);
+      console.error('Error saving settings:', err);
     }
   };
 
@@ -292,9 +375,8 @@ export const AdminPage: React.FC = () => {
     if (!confirm(`Ви впевнені, що хочете видалити ${selectedProducts.length} товарів?`)) return;
 
     try {
-      await Promise.all(selectedProducts.map(id => 
-        deleteDoc(doc(db, 'products', id.toString()))
-      ));
+      const { error } = await supabase.from('products').delete().in('id', selectedProducts);
+      if (error) throw error;
       setSelectedProducts([]);
       alert('Товари успішно видалені');
     } catch (err) {
@@ -303,105 +385,30 @@ export const AdminPage: React.FC = () => {
   };
 
   const handleDeleteAllProducts = async () => {
-    console.log('Started handleDeleteAllProducts');
     setIsConfirmingDeleteAll(false);
     setIsImporting(true);
     setImportProgress(0);
-    setShouldStopDeletion(false);
-    
-    let totalDeleted = 0;
-    let startTotal = 0;
     
     try {
-      // 1. Refresh total count before starting
-      const totalSnap = await getCountFromServer(collection(db, 'products'));
-      startTotal = totalSnap.data().count;
-      setTotalProductsCount(startTotal);
-      setDeleteProgressStats({ current: 0, total: startTotal });
+      // Supabase is better with many deletions if you use RPC or just delete all with a filter
+      // For a simple 'delete all', it might be limited by RLS or timeout if it's 8000.
+      // But we can try the direct approach:
+      const { error, count } = await supabase
+        .from('products')
+        .delete()
+        .neq('id', '00000000-0000-0000-0000-000000000000'); // Deletes everything but that phantom id
+
+      if (error) throw error;
       
-      if (startTotal === 0) {
-        alert('База даних уже порожня.');
-        setIsImporting(false);
-        return;
-      }
-
-      console.log(`Attempting to delete ${startTotal} products...`);
-
-      let hasMore = true;
-      const batchLimit = 250; // Further lowered for maximum stability
-      
-      while (hasMore) {
-        // Check if user clicked STOP
-        if ((window as any)._stopDeletionFlag) {
-          console.log('Deletion stopped by user');
-          break;
-        }
-
-        // Query next batch
-        const q = query(collection(db, 'products'), limit(batchLimit));
-        const snapshot = await getDocs(q);
-        
-        if (snapshot.empty) {
-          console.log('No more products to delete');
-          hasMore = false;
-          break;
-        }
-
-        const batch = writeBatch(db);
-        snapshot.docs.forEach(d => {
-          batch.delete(d.ref);
-        });
-        
-        await batch.commit();
-        totalDeleted += snapshot.size;
-        
-        // Update progress
-        const progress = Math.min(100, Math.round((totalDeleted / (startTotal || totalDeleted)) * 100));
-        setImportProgress(progress);
-        setDeleteProgressStats({ current: totalDeleted, total: startTotal });
-        
-        console.log(`Deleted ${totalDeleted} of ~${startTotal}`);
-
-        // Give breathing room
-        await new Promise(resolve => setTimeout(resolve, 400));
-        
-        if (snapshot.size < batchLimit) {
-          hasMore = false;
-        }
-      }
-      
-      if ((window as any)._stopDeletionFlag) {
-        alert(`Видалення зупинено користувачем. Видалено ${totalDeleted} товарів.`);
-      } else {
-        alert(`Операцію успішно завершено! Видалено ${totalDeleted} товарів.`);
-      }
+      alert(`Всі товари успішно видалені.`);
       setTotalProductsCount(0);
+      setProducts([]);
     } catch (err: any) {
       console.error('CRITICAL: Delete all error:', err);
-      const errStr = err?.message || err?.toString() || '';
-      const isQuotaError = errStr.includes('Quota exceeded') || errStr.includes('resource-exhausted') || errStr.includes('quota-exceeded');
-      
-      let friendlyError = '';
-      if (isQuotaError) {
-        friendlyError = `ВИЧЕРПАНО ЛІМІТ: Ви використали добову квоту безкоштовних операцій Google Firestore (20,000 записів). \n\nВдалося видалити ${totalDeleted} товарів. Решта товарів буде доступна для видалення ЗАВТРА, коли Google оновить ваш безкоштовний ліміт.`;
-        // Set a global flag for the session to show a persistent warning if needed
-        try { sessionStorage.setItem('firestore_quota_exhausted', 'true'); } catch(e) {}
-      } else if (errStr.includes('offline') || errStr.includes('network')) {
-        friendlyError = `Проблема з мережею. Процес зупинився на ${totalDeleted} товарі. Перевірте інтернет та спробуйте ще раз.`;
-      } else {
-        friendlyError = `Помилка при видаленні: ${errStr}. Вдалося видалити ${totalDeleted} товарів.`;
-      }
-      
-      alert(friendlyError);
+      alert(`Помилка при видаленні: ${err.message}`);
     } finally {
       setIsImporting(false);
       setImportProgress(0);
-      setDeleteProgressStats({ current: 0, total: 0 });
-      (window as any)._stopDeletionFlag = false;
-      try {
-        const finalSnap = await getCountFromServer(collection(db, 'products'));
-        setTotalProductsCount(finalSnap.data().count);
-      } catch (e) {}
     }
   };
 
@@ -419,6 +426,24 @@ export const AdminPage: React.FC = () => {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Orders");
     XLSX.writeFile(wb, `orders_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
+  const handleDownloadTemplate = () => {
+    const data = [{
+      "Назва": "Приклад товару",
+      "Ціна": 1000,
+      "Категорія": "Автотовари",
+      "Артикул": "ART-123",
+      "Бренд": "BrandName",
+      "Опис": "Детальний опис товару",
+      "Зображення": "https://example.com/image.jpg",
+      "Тип": "auto",
+      "Залишок": 10
+    }];
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Template");
+    XLSX.writeFile(wb, "products_template.xlsx");
   };
 
   const getChartData = () => {
@@ -451,14 +476,16 @@ export const AdminPage: React.FC = () => {
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await addDoc(collection(db, 'products'), {
+      const { error } = await supabase.from('products').insert({
         ...newProduct,
-        stock: Number(newProduct.stock) || 1,
-        created_at: serverTimestamp()
+        image_url: newProduct.image,
+        stock: Number(newProduct.stock) || 1
       });
+      if (error) throw error;
       setIsAddingProduct(false);
       setNewProduct({ name: '', price: 0, category: '', description: '', image: '', stock: 1, type: 'auto' });
       alert('Товар успішно додано!');
+      setProductSearch(''); // Trigger refresh
     } catch (err) {
       alert('Помилка при додаванні товару');
     }
@@ -467,11 +494,12 @@ export const AdminPage: React.FC = () => {
   const handleConfirmDelete = async () => {
     if (productToDelete) {
       try {
-        await deleteDoc(doc(db, 'products', productToDelete.id.toString()));
+        const { error } = await supabase.from('products').delete().eq('id', productToDelete.id);
+        if (error) throw error;
         setProductToDelete(null);
+        setProducts(prev => prev.filter(p => p.id !== productToDelete.id));
       } catch (err) {
         console.error('Delete product error:', err);
-        handleFirestoreError(err, OperationType.DELETE, `products/${productToDelete.id}`);
         alert('Помилка при видаленні товару');
       }
     }
@@ -486,21 +514,38 @@ export const AdminPage: React.FC = () => {
     if (!editingProduct) return;
     
     const { id, ...data } = editingProduct;
-    await updateDoc(doc(db, 'products', id.toString()), data);
+    await supabase.from('products').update({
+      ...data,
+      image_url: data.image
+    }).eq('id', id);
     setEditingProduct(null);
   };
 
   const handleUpdateOrderStatus = async (id: string | number, status: string) => {
-    await updateDoc(doc(db, 'orders', id.toString()), { status });
+    const { error } = await supabase
+      .from('orders')
+      .update({ status })
+      .eq('id', id);
+    if (error) {
+      alert('Помилка при оновленні статусу');
+    } else {
+      setOrders(prev => prev.map(o => o.id === id ? { ...o, status: status as any } : o));
+    }
   };
 
   const handleAddPost = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await addDoc(collection(db, 'blog'), {
-        ...newPost,
-        createdAt: serverTimestamp()
+      const { error } = await supabase.from('blog').insert({
+        title: newPost.title,
+        excerpt: newPost.excerpt,
+        content: newPost.content,
+        author: newPost.author,
+        category: newPost.category,
+        image_url: newPost.image,
+        read_time: newPost.readTime
       });
+      if (error) throw error;
       setIsAddingPost(false);
       setNewPost({ title: '', excerpt: '', content: '', author: 'Адміністратор', category: 'Поради', image: '', readTime: '5 хв' });
       alert('Статтю успішно додано!');
@@ -513,13 +558,34 @@ export const AdminPage: React.FC = () => {
     e.preventDefault();
     if (!editingPost) return;
     const { id, ...data } = editingPost;
-    await updateDoc(doc(db, 'blog', id.toString()), data);
-    setEditingPost(null);
+    const { error } = await supabase
+      .from('blog')
+      .update({
+        title: data.title,
+        excerpt: data.excerpt,
+        content: data.content,
+        author: data.author,
+        category: data.category,
+        image_url: (data as any).image_url || (data as any).image,
+        read_time: (data as any).read_time || (data as any).readTime
+      })
+      .eq('id', id);
+    
+    if (error) {
+      alert('Помилка при оновленні статті');
+    } else {
+      setEditingPost(null);
+    }
   };
 
   const handleDeletePost = async (id: string) => {
     if (confirm('Ви впевнені, що хочете видалити цю статтю?')) {
-      await deleteDoc(doc(db, 'blog', id));
+      const { error } = await supabase.from('blog').delete().eq('id', id);
+      if (error) {
+        alert('Помилка при видаленні статті');
+      } else {
+        setBlogPosts(prev => prev.filter(p => p.id !== id));
+      }
     }
   };
 
@@ -559,6 +625,8 @@ export const AdminPage: React.FC = () => {
     setIsImporting(true);
     setImportProgress(0);
 
+    const fileInput = e.target;
+
     const reader = new FileReader();
     reader.onload = async (evt) => {
       try {
@@ -566,7 +634,6 @@ export const AdminPage: React.FC = () => {
         if (!dataBuffer) throw new Error('Не вдалося прочитати файл');
 
         const workbook = XLSX.read(dataBuffer, { type: 'array' });
-        console.log('Available sheets:', workbook.SheetNames);
         
         // Use the first sheet by default
         const targetSheetName = workbook.SheetNames[0];
@@ -574,7 +641,6 @@ export const AdminPage: React.FC = () => {
         
         // Convert to JSON with raw headers to see what's actually there
         const rawData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
-        console.log('Raw rows (first 10):', rawData.slice(0, 10));
 
         // Find the header row index (row with multiple columns with text)
         let headerRowIndex = -1;
@@ -599,80 +665,101 @@ export const AdminPage: React.FC = () => {
           headerRowIndex = 0; // Fallback
         }
 
-        console.log('Found header at row:', headerRowIndex + 1);
         const allRows = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" }) as any[];
         
-        const getVal = (item: any, keys: string[]) => {
-          if (!item) return undefined;
-          const itemKeys = Object.keys(item);
-          const foundKey = itemKeys.find(k => 
-            keys.some(target => {
-              const normalizedK = k.toString().toLowerCase().trim();
-              const normalizedTarget = target.toLowerCase().trim();
-              return normalizedK === normalizedTarget || normalizedK.includes(normalizedTarget);
+        if (allRows.length === 0) {
+          alert('Файл порожній або не містить даних після заголовку.');
+          setIsImporting(false);
+          return;
+        }
+
+        // Pre-calculate column mapping for better performance
+        const headers = Object.keys(allRows[0]);
+        const findMappedKey = (targetKeys: string[]) => {
+          return headers.find(h => 
+            targetKeys.some(tk => {
+              const normH = h.toLowerCase().trim();
+              const normTK = tk.toLowerCase().trim();
+              return normH === normTK || normH.includes(normTK);
             })
           );
-          return foundKey ? item[foundKey] : undefined;
+        };
+
+        const fieldMapping = {
+          name: findMappedKey(["Назва", "Назва товару", "Повна назва товару", "Name", "Наименование", "Title", "Товар"]),
+          price: findMappedKey(["Ціна", "Ціна (грн)", "Ціна продажу грн", "Price", "Цена", "Cost"]),
+          category: findMappedKey(["Категорія", "Category", "Категория", "Group"]),
+          article: findMappedKey(["Артикул", "Оригінал (скорочено)", "Article", "Код", "Sku"]),
+          brand: findMappedKey(["Бренд", "Виробник", "Brand", "Производитель"]),
+          description: findMappedKey(["Опис", "Опис товару (SEO)", "Опис для сайту", "Description", "Описание", "SEO"]),
+          image: findMappedKey(["Зображення", "Оригінал (посилання)", "Image", "Изображение", "Link", "URL", "Фото"]),
+          type: findMappedKey(["Тип", "Місце на сайті", "Type"]),
+          stock: findMappedKey(["Залишок", "Stock", "Кількість", "Кол-во"])
         };
 
         let currentCategory = "Загальне";
         const productsToImport: any[] = [];
 
         allRows.forEach((p) => {
-          const nameRaw = getVal(p, ["Назва товару", "Повна назва товару", "Name", "Назва", "Наименование", "Title", "Товар", "name"]);
+          const nameRaw = fieldMapping.name ? p[fieldMapping.name] : undefined;
           const name = nameRaw?.toString().trim() || "";
           
           if (!name || name === "" || name.includes('Позицій:')) return;
 
-          const priceRaw = getVal(p, ["Ціна продажу грн", "Ціна продажу, грн", "Price", "Ціна", "Цена", "Cost", "price", "Ціна (грн)"]);
+          const priceRaw = fieldMapping.price ? p[fieldMapping.price] : undefined;
           
           let cleanPrice = 0;
           if (typeof priceRaw === 'number') cleanPrice = priceRaw;
-          else if (typeof priceRaw === 'string') {
-            const sanitized = priceRaw.replace(/[₴$€\s]/g, '').replace(',', '.');
-            cleanPrice = parseFloat(sanitized.replace(/[^0-9.]/g, ''));
+          else if (priceRaw) {
+            const sanitized = priceRaw.toString().replace(/[₴$€\s]/g, '').replace(',', '.');
+            cleanPrice = parseFloat(sanitized.replace(/[^0-9.]/g, '')) || 0;
           }
 
           // Recognition of Category Row (Image 2)
-          // Look for markers like ▶, symbols, or rows with only name and no price
           const isCategoryMarker = name.startsWith('▶') || name.startsWith('►') || name.startsWith('•') || name.startsWith('⁃') || name.startsWith('>');
           
-          // If it's a category marker OR has name but absolutely no price/article/brand info
           if (isCategoryMarker || (name && (isNaN(cleanPrice) || cleanPrice <= 0))) {
             const potentialCat = name.replace(/^[▶►•⁃>\s]+/, '').trim();
-            // Basic sanity check: category name shouldn't be TOO long
             if (potentialCat.length > 2 && potentialCat.length < 100) {
               currentCategory = potentialCat;
-              console.log('Sticky category changed to:', currentCategory);
               return; // Skip category row itself
             }
           }
 
           // If it's a product row (must have name and price)
           if (name && !isNaN(cleanPrice) && cleanPrice > 0) {
-            const categoryFromCols = getVal(p, ["Категорія", "Category", "Категория", "Group", "category"]);
-            const description = getVal(p, ["Опис для сайту", "Description", "Опис", "Описание", "description", "Опис (SEO)"]);
-            const image = getVal(p, ["Image", "Зображення", "Изображение", "image", "Link", "URL", "Посилання", "Фото"]);
-            const stock = getVal(p, ["Stock", "Кількість", "Кол-во", "Залишок", "stock"]);
-            const typeVal = getVal(p, ["Type", "Тип", "type"]);
-            const brand = getVal(p, ["Країна виробника", "Brand", "Бренд", "Производитель", "Виробник", "brand"]);
-            const article = getVal(p, ["Оригінал (скорочено)", "Article", "Артикул", "Код", "Sku", "article"]);
+            const categoryValue = fieldMapping.category ? p[fieldMapping.category] : undefined;
+            const descriptionValue = fieldMapping.description ? p[fieldMapping.description] : undefined;
+            const imageValue = fieldMapping.image ? p[fieldMapping.image] : undefined;
+            const stockValue = fieldMapping.stock ? p[fieldMapping.stock] : undefined;
+            const typeValue = fieldMapping.type ? p[fieldMapping.type] : undefined;
+            const brandValue = fieldMapping.brand ? p[fieldMapping.brand] : undefined;
+            const articleValue = fieldMapping.article ? p[fieldMapping.article] : undefined;
+
+            // Determine type based on "Місце на сайті" or logic
+            let finalType = 'auto'; // Default
+            const typeStr = typeValue?.toString().toLowerCase() || '';
+            const nameLower = name.toLowerCase();
+
+            if (typeStr.includes('сантехніка') || typeStr.includes('plumbing') || nameLower.includes('труба') || nameLower.includes('кран')) {
+              finalType = 'plumbing';
+            } else if (typeStr.includes('авто') || typeStr.includes('auto')) {
+              finalType = 'auto';
+            }
 
             productsToImport.push({
               name,
               price: cleanPrice,
-              category: categoryFromCols?.toString().trim() || currentCategory,
-              description: description?.toString() || (article ? `Артикул: ${article}` : ''),
-              image: image?.toString() || '',
-              stock: Number(stock) || 1,
-              type: (typeVal?.toString().toLowerCase() === 'plumbing' || typeVal?.toString().toLowerCase() === 'сантехніка' || name.toLowerCase().includes('труба') || name.toLowerCase().includes('кран')) ? 'plumbing' : 'auto',
-              brand: brand?.toString() || '',
-              article: article?.toString() || ''
+              category: categoryValue?.toString().trim() || currentCategory,
+              description: descriptionValue?.toString() || (articleValue ? `Артикул: ${articleValue}` : ''),
+              image_url: imageValue?.toString() || '',
+              stock: Number(stockValue) || 1,
+              type: finalType,
+              brand: brandValue?.toString() || '',
+              article: articleValue?.toString() || ''
             });
           }
         });
-
-        console.log('Products ready to import:', productsToImport.length);
 
         if (productsToImport.length === 0) {
           alert(`Знайдено 0 товарів. Перевірте формат таблиці (Назва, Ціна).`);
@@ -680,58 +767,192 @@ export const AdminPage: React.FC = () => {
           return;
         }
 
-        if (!confirm(`Знайдено ${productsToImport.length} товарів. Почати імпорт?`)) {
-          setIsImporting(false);
-          return;
-        }
-
-        console.log(`Starting import of ${productsToImport.length} products...`);
-        
-        let autoCount = 0;
-        let plumbingCount = 0;
-        let importedCount = 0;
-        const batchSize = 250;
-        
-        for (let i = 0; i < productsToImport.length; i += batchSize) {
-          try {
-            const batch = writeBatch(db);
-            const chunk = productsToImport.slice(i, i + batchSize);
-            
-            chunk.forEach((p) => {
-              if (p.type === 'auto') autoCount++;
-              else plumbingCount++;
-
-              const newDocRef = doc(collection(db, 'products'));
-              batch.set(newDocRef, {
-                ...p,
-                created_at: serverTimestamp()
-              });
-              importedCount++;
-            });
-
-            await batch.commit();
-            setImportProgress(Math.min(100, Math.round(((i + chunk.length) / productsToImport.length) * 100)));
-            await new Promise(resolve => setTimeout(resolve, 800));
-          } catch (batchErr) {
-            console.error(`Error in batch starting at ${i}:`, batchErr);
-            if (batchErr?.toString().includes('Quota exceeded')) {
-              alert('Добову квоту Firestore вичерпано. Імпорт зупинено.');
-              break;
-            }
-          }
-        }
-
-        alert(`Імпорт завершено!\nВсього знайдено: ${productsToImport.length}\nУспішно імпортовано: ${importedCount}\n- Авто: ${autoCount}\n- Сантехніка: ${plumbingCount}`);
-        e.target.value = ''; 
+        console.log('✅ Prepared products for import:', productsToImport.slice(0, 3));
+        setPendingProductsToImport(productsToImport);
+        setIsConfirmingRegularImport(true);
+        setIsImporting(false); // Reset to allow button interaction again if needed
+        if (fileInput) fileInput.value = '';
       } catch (err) {
         console.error('Import error:', err);
-        alert('Помилка при імпорті. Переконайтеся, що файл не захищений паролем і має коректні заголовки.');
-      } finally {
+        alert('Помилка при зчитуванні файлу. Переконайтеся, що файл не захищений паролем.');
         setIsImporting(false);
-        setImportProgress(0);
       }
     };
     reader.readAsArrayBuffer(file);
+  };
+
+  const checkSupabaseConnection = async () => {
+    if (!supabase || !import.meta.env.VITE_SUPABASE_URL || import.meta.env.VITE_SUPABASE_URL.includes('missing-supabase-url')) {
+      alert('Supabase не налаштовано! Додайте VITE_SUPABASE_URL та VITE_SUPABASE_ANON_KEY у налаштуваннях.');
+      return false;
+    }
+
+    try {
+      console.log('🔍 Checking Supabase connection details...');
+      const url = import.meta.env.VITE_SUPABASE_URL || '';
+      console.log('URL:', url);
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+      console.log('Key prefix:', anonKey.substring(0, 15) + '...');
+
+      if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
+        alert(`УВАГА! Ваш Supabase URL виглядає некоректним: "${url}"\n\nВін зазвичай починається з "https://" і закінчується на ".supabase.co".\nБудь ласка, перевірте його в налаштуваннях (Settings -> Secrets).`);
+        return false;
+      }
+
+      if (url === '111' || anonKey.includes('111')) {
+        alert('УВАГА! У ваших секретах (Settings -> Secrets) встановлено значення "111".\n\nБудь ласка, видаліть їх або встановіть реальні URL та Key від Supabase.');
+        return false;
+      }
+
+      if (anonKey.startsWith('pk_test_') || anonKey.startsWith('pk_live_')) {
+        alert('УВАГА! Схоже, ви вказали Stripe-ключ (pk_...) замість Supabase Anon Key.');
+        return false;
+      }
+
+      // Increased timeout to 45s for free-tier hibernation wake up
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Перевищено час очікування відповіді від Supabase (45с). Проект міг "заснути" або URL невірний.')), 45000)
+      );
+      
+      const connectionPromise = supabase.from('products').select('id', { count: 'exact', head: true }).limit(1);
+      
+      const { error } = await Promise.race([connectionPromise, timeoutPromise]) as any;
+      if (error) {
+        console.error('Supabase error detail:', error);
+        throw error;
+      }
+      
+      return true;
+    } catch (err: any) {
+      console.error('Supabase connection check failed:', err);
+      const msg = err.message || String(err);
+      if (msg.includes('Failed to fetch') || err.name === 'TypeError') {
+        const currentUrl = import.meta.env.VITE_SUPABASE_URL;
+        alert(`Помилка з'єднання ("Failed to fetch")!\n\nЦе означає, що браузер не може зв'язатися з Supabase.\nВаш поточний URL: ${currentUrl}\n\nЯКЩО URL ВЕРНИЙ: Спробуйте вимкнути VPN або змінити браузер.\nЯКЩО URL НЕВІРНИЙ: Виправте його в налаштуваннях (Settings -> Secrets).`);
+      } else {
+        alert(`Помилка підключення: ${msg}`);
+      }
+      return false;
+    }
+  };
+
+  const executeRegularImport = async () => {
+    setIsConfirmingRegularImport(false);
+    setIsImporting(true);
+    setImportStatus('Перевірка з\'єднання з базою...');
+    setImportProgress(5);
+    
+    // Check connection first
+    const isConnected = await checkSupabaseConnection();
+    
+    if (!isConnected) {
+      setIsImporting(false);
+      return;
+    }
+
+    const productsToImport = pendingProductsToImport;
+    const totalCount = productsToImport.length;
+    
+    setImportProgress(10);
+    setImportStats({ current: 0, total: totalCount });
+    setShouldStopImport(false);
+    stopImportRef.current = false;
+    setImportStatus(`Підготовка до імпорту ${totalCount} товарів...`);
+    
+    // Final sanity check
+    if (totalCount === 0) {
+      alert('Помилка: Список товарів для імпорту порожній!');
+      setIsImporting(false);
+      return;
+    }
+
+    console.log(`🚀 Starting high-volume import: ${totalCount} products. Batch size: 50.`);
+    
+    let autoCount = 0;
+    let plumbingCount = 0;
+    let importedCount = 0;
+    const batchSize = 50; 
+    
+    for (let i = 0; i < totalCount; i += batchSize) {
+      if (stopImportRef.current) {
+        setImportStatus('Імпорт зупинено користувачем');
+        console.warn('Import manually stopped by user.');
+        break;
+      }
+      try {
+        setImportStatus(`Завантаження пачки ${Math.floor(i/batchSize) + 1}... (${i}/${totalCount})`);
+        const chunk = productsToImport.slice(i, i + batchSize);
+        
+        const batchData = chunk.map(p => {
+          const item: any = {
+            name: p.name || 'Без назви',
+            price: Number(p.price) || 0,
+            category: p.category || 'Інше',
+            description: p.description || '',
+            stock: Number(p.stock) || 0,
+            brand: p.brand || '',
+            article: p.article || '',
+            image_url: p.image_url || '',
+            type: p.type || 'auto' // RE-ADDED: crucial for visibility on site
+          };
+          
+          return item;
+        });
+
+        console.log(`📡 Uploading batch ${Math.floor(i/batchSize) + 1} (${chunk.length} items).`);
+
+        const { data: insertedData, error } = await supabase
+          .from('products')
+          .insert(batchData)
+          .select('id');
+        
+        if (error) {
+          console.error(`❌ Batch ERROR at index ${i}:`, error);
+          
+          if (error.message?.includes('column') && error.message?.includes('does not exist')) {
+            const missingCol = error.message.match(/'([^']+)'/)?.[1] || 'невідома колонка';
+            alert(`ПОМИЛКА СТРУКТУРИ: У вашій таблиці Supabase відсутня колонка "${missingCol}".\nБудь ласка, додайте її в редакторі таблиць Supabase або зверніться до розробника.`);
+            setIsImporting(false);
+            return; // Stop the whole import if structure is wrong
+          }
+          
+          let alertMsg = `Помилка пакетного завантаження (пачка ${Math.floor(i/batchSize) + 1}):\n\n${error.message}`;
+          if (error.details) alertMsg += `\n\nДеталі: ${error.details}`;
+          if (error.hint) alertMsg += `\n\nПідказка: ${error.hint}`;
+          
+          alert(alertMsg);
+          throw new Error(error.message);
+        }
+        
+        console.log(`✅ Batch ${Math.floor(i/batchSize) + 1} SUCCESS. Inserted count: ${insertedData?.length || 0}`);
+        importedCount += chunk.length;
+        chunk.forEach(p => {
+          if (p.type === 'auto') autoCount++;
+          else plumbingCount++;
+        });
+
+        setImportStats(prev => ({ ...prev, current: importedCount }));
+        setImportProgress(Math.round((importedCount / totalCount) * 100));
+        
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (batchErr: any) {
+        console.error(`🛑 FATAL CRASH at index ${i}:`, batchErr);
+        alert(`КРИТИЧНА ПОМИЛКА: ${batchErr.message}\n\nПроцес зупинено щоб уникнути нескінченних запитів.`);
+        setIsImporting(false);
+        return; // Complete exit from function
+      }
+    }
+
+    console.log('🏁 Import Finished.', { totalCount, importedCount, autoCount, plumbingCount });
+    setImportStatus('Імпорт завершено!');
+    alert(`Імпорт завершено!\n\nУспішно додано: ${importedCount} з ${totalCount}\n- Автотовари: ${autoCount}\n- Сантехніка: ${plumbingCount}`);
+    
+    setIsImporting(false);
+    setImportProgress(0);
+    setImportStats({ current: 0, total: 0 });
+    setImportStatus('');
+    setPendingProductsToImport([]);
+    refreshAllData();
   };
 
   const handleSmartImport = async (file: File) => {
@@ -802,6 +1023,10 @@ export const AdminPage: React.FC = () => {
   const executeSmartImport = async () => {
     if (!pendingImportData || !detectedMapping) return;
 
+    // Check connection first
+    const isConnected = await checkSupabaseConnection();
+    if (!isConnected) return;
+
     try {
       let currentCategory = "Загальне";
       const processedProducts: any[] = [];
@@ -844,7 +1069,7 @@ export const AdminPage: React.FC = () => {
             price: cleanPrice,
             category: catVal?.toString().trim() || currentCategory,
             description: descVal?.toString() || (artVal ? `Артикул: ${artVal}` : ''),
-            image: imgVal?.toString() || '',
+            image_url: imgVal?.toString() || '',
             stock: Number(stockVal) || 1,
             type: (currentCategory.toLowerCase().includes('сантехніка') || name.toLowerCase().includes('змішувач') || name.toLowerCase().includes('кран')) ? 'plumbing' : 'auto',
             brand: brandVal?.toString() || '',
@@ -858,41 +1083,45 @@ export const AdminPage: React.FC = () => {
         return;
       }
 
-      let autoCount = 0;
-      let plumbingCount = 0;
-      let importedCount = 0;
-      const batchSize = 250;
+    setImportProgress(0);
+    setImportStats({ current: 0, total: processedProducts.length });
+    setImportStatus('Готуємо дані для завантаження...');
+    setShouldStopImport(false);
+    stopImportRef.current = false;
+    
+    let importedCount = 0;
+    const batchSize = 50; 
 
-      for (let i = 0; i < processedProducts.length; i += batchSize) {
-        try {
-          const batch = writeBatch(db);
-          const chunk = processedProducts.slice(i, i + batchSize);
-          
-          chunk.forEach((p) => {
-            if (p.type === 'auto') autoCount++;
-            else plumbingCount++;
-
-            const newDocRef = doc(collection(db, 'products'));
-            batch.set(newDocRef, {
-              ...p,
-              created_at: serverTimestamp()
-            });
-            importedCount++;
-          });
-
-          await batch.commit();
-          setImportProgress(Math.min(100, Math.round(((i + chunk.length) / processedProducts.length) * 100)));
-          await new Promise(resolve => setTimeout(resolve, 800));
-        } catch (batchErr) {
-          console.error(`Smart batch error at ${i}:`, batchErr);
-          if (batchErr?.toString().includes('Quota exceeded')) {
-            alert('Квоту вичерпано. Зупинка імпорту.');
-            break;
-          }
-        }
+    for (let i = 0; i < processedProducts.length; i += batchSize) {
+      if (stopImportRef.current) {
+        setImportStatus('Імпорт зупинено користувачем');
+        console.warn('Smart import manually stopped.');
+        break;
       }
+      try {
+        setImportStatus(`Завантаження пачки ${Math.floor(i/batchSize) + 1}...`);
+        const chunk = processedProducts.slice(i, i + batchSize);
+        const { error } = await supabase.from('products').insert(chunk);
+        if (error) {
+          console.error(`Smart batch error at ${i}:`, error);
+          throw new Error(`Помилка Supabase (пакет ${Math.floor(i/batchSize) + 1}): ${error.message}`);
+        }
+        
+        importedCount += chunk.length;
+        setImportStatus(`Оброблено ${importedCount} з ${processedProducts.length}...`);
+        setImportStats(prev => ({ ...prev, current: importedCount }));
+        setImportProgress(Math.min(100, Math.round(((i + chunk.length) / processedProducts.length) * 100)));
+        await new Promise(resolve => setTimeout(resolve, 200));
+      } catch (batchErr: any) {
+        console.error(`Smart batch FATAL at ${i}:`, batchErr);
+        alert(`КРИТИЧНА ПОМИЛКА: ${batchErr.message}`);
+        setIsImporting(false);
+        return;
+      }
+    }
 
-      alert(`Розумний імпорт завершено!\nУспішно додано: ${importedCount} товарів.`);
+    setImportStatus('Імпорт завершено!');
+    alert(`Розумний імпорт завершено!\nУспішно додано: ${importedCount} товарів.`);
       setPendingImportData(null);
       setDetectedMapping(null);
     } catch (err) {
@@ -1032,6 +1261,48 @@ export const AdminPage: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Regular Import Confirmation Modal */}
+      <AnimatePresence>
+        {isConfirmingRegularImport && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl max-w-md w-full p-6 border border-gray-100 dark:border-gray-700"
+            >
+              <div className="flex items-center gap-3 mb-4 text-blue-600">
+                <Upload size={24} />
+                <h3 className="text-xl font-bold">Підтвердження імпорту</h3>
+              </div>
+              
+              <p className="text-gray-600 dark:text-gray-400 mb-6 font-medium">
+                Знайдено <span className="font-black text-gray-900 dark:text-white px-2 py-1 bg-blue-50 dark:bg-blue-900/30 rounded-lg">{pendingProductsToImport.length}</span> товарів. Ви готові розпочати заповнення бази даних?
+              </p>
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => {
+                    setIsConfirmingRegularImport(false);
+                    setPendingProductsToImport([]);
+                    setIsImporting(false);
+                  }}
+                  className="flex-1 px-4 py-3 border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors font-bold text-gray-500"
+                >
+                  Скасувати
+                </button>
+                <button
+                  onClick={executeRegularImport}
+                  className="flex-1 px-4 py-3 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all font-bold shadow-lg shadow-blue-200 active:scale-95"
+                >
+                  Почати завантаження
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* AI Processing Modal */}
       <AnimatePresence>
         {isAiMapping && (
@@ -1064,6 +1335,7 @@ export const AdminPage: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+
 
       <AnimatePresence>
         {isConfirmingDeleteAll && (
@@ -1461,6 +1733,14 @@ export const AdminPage: React.FC = () => {
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
               <h1 className="text-4xl font-black text-gray-900">Управління товарами</h1>
               <div className="flex flex-wrap gap-4">
+                <button 
+                  onClick={refreshAllData}
+                  className="p-3 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-all flex items-center space-x-2"
+                  title="Оновити дані"
+                >
+                  <Plus className={(isImporting || totalProductsCount === 0) ? 'animate-spin' : ''} size={18} />
+                  <span className="font-bold">Оновити</span>
+                </button>
                 <div className="relative">
                   <input 
                     type="text"
@@ -1485,6 +1765,13 @@ export const AdminPage: React.FC = () => {
                   <span>{isImporting ? `Імпорт ${importProgress}%` : 'Імпорт XLSX'}</span>
                   <input type="file" accept=".xlsx, .xls, .csv" onChange={handleImportExcel} className="hidden" disabled={isImporting} />
                 </label>
+                <button 
+                  onClick={handleDownloadTemplate}
+                  className="flex items-center space-x-2 bg-white border border-gray-200 px-6 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all text-gray-600"
+                >
+                  <Download size={18} />
+                  <span>Шаблон XLSX</span>
+                </button>
                 <label className={`flex items-center space-x-2 bg-purple-50 text-purple-600 border border-purple-100 px-6 py-3 rounded-xl font-bold cursor-pointer hover:bg-purple-100 transition-all ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
                   <Sparkles size={18} className={isAiMapping ? 'animate-pulse' : ''} />
                   <span>Розумний імпорт (AI)</span>
@@ -1502,8 +1789,10 @@ export const AdminPage: React.FC = () => {
         <button 
           onClick={async () => {
             try {
-              const snap = await getCountFromServer(collection(db, 'products'));
-              setTotalProductsCount(snap.data().count);
+              const { count } = await supabase
+                .from('products')
+                .select('*', { count: 'exact', head: true });
+              if (count !== null) setTotalProductsCount(count);
             } catch (e) {}
             setIsConfirmingDeleteAll(true);
           }}
@@ -2106,11 +2395,25 @@ export const AdminPage: React.FC = () => {
               
               <div className="space-y-2">
                 <h3 className="text-2xl font-black text-gray-900 dark:text-white">Триває обробка...</h3>
+                
+                {importStats.total > 0 && (
+                  <div className="bg-gray-50 dark:bg-gray-900/40 rounded-2xl p-4 border border-gray-100 dark:border-gray-800">
+                    <div className="flex justify-between text-sm font-bold mb-1">
+                      <span className="text-gray-500">Додано товарів:</span>
+                      <span className="text-blue-600">{importStats.current} з {importStats.total}</span>
+                    </div>
+                    <p className="text-[10px] text-gray-400 truncate mt-1">
+                      {importStatus || 'Завантаження даних у систему...'}
+                    </p>
+                  </div>
+                )}
+
                 {deleteProgressStats.total > 0 && (
-                  <p className="text-blue-600 font-bold">
+                  <p className="text-blue-600 font-bold bg-blue-50 dark:bg-blue-900/20 py-2 rounded-xl">
                     Видалено {deleteProgressStats.current} з {deleteProgressStats.total}
                   </p>
                 )}
+
                 <p className="text-sm text-gray-500 dark:text-gray-400">
                   Будь ласка, не закривайте сторінку.
                 </p>
@@ -2126,9 +2429,14 @@ export const AdminPage: React.FC = () => {
                 
                 <button 
                   onClick={() => {
+                    setShouldStopImport(true);
+                    stopImportRef.current = true;
+                    setShouldStopDeletion(true);
                     (window as any)._stopDeletionFlag = true;
-                    // Also immediately close if it really hangs
-                    setTimeout(() => setIsImporting(false), 2000);
+                    setTimeout(() => {
+                      setIsImporting(false);
+                      setImportStatus('Зупинено');
+                    }, 500);
                   }}
                   className="w-full py-3 bg-red-50 text-red-600 rounded-xl font-bold hover:bg-red-100 transition-all text-sm"
                 >

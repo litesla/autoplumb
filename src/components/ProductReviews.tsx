@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Star, User, MessageSquare, Send, Loader2, Trash2 } from 'lucide-react';
-import { db, auth, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, addDoc, query, where, onSnapshot, orderBy, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
+import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -24,26 +23,42 @@ export const ProductReviews: React.FC<{ productId: string }> = ({ productId }) =
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const path = 'reviews';
-    const q = query(
-      collection(db, path),
-      where('productId', '==', productId),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const reviewsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Review[];
-      setReviews(reviewsData);
+    const fetchReviews = async () => {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('product_id', productId)
+        .order('created_at', { ascending: false });
+      
+      if (data) {
+        setReviews(data.map(r => ({
+          ...r,
+          productId: r.product_id,
+          userId: r.user_id,
+          userName: r.user_name,
+          createdAt: r.created_at
+        })) as unknown as Review[]);
+      }
       setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-      setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
+    fetchReviews();
+
+    const channel = supabase
+      .channel(`product_reviews_${productId}`)
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'reviews',
+        filter: `product_id=eq.${productId}`
+      }, () => {
+        fetchReviews();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [productId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -51,20 +66,20 @@ export const ProductReviews: React.FC<{ productId: string }> = ({ productId }) =
     if (!user || !comment.trim() || isSubmitting) return;
 
     setIsSubmitting(true);
-    const path = 'reviews';
     try {
-      await addDoc(collection(db, path), {
-        productId,
-        userId: user.uid,
-        userName: user.email?.split('@')[0] || 'Анонім',
+      const { error } = await supabase.from('reviews').insert({
+        product_id: productId,
+        user_id: user.uid,
+        user_name: user.email?.split('@')[0] || 'Анонім',
         rating,
-        comment: comment.trim(),
-        createdAt: serverTimestamp()
+        comment: comment.trim()
       });
+      if (error) throw error;
       setComment('');
       setRating(5);
     } catch (error) {
-      handleFirestoreError(error, OperationType.CREATE, path);
+      console.error('Error adding review:', error);
+      alert('Помилка при додаванні відгуку');
     } finally {
       setIsSubmitting(false);
     }
@@ -72,11 +87,11 @@ export const ProductReviews: React.FC<{ productId: string }> = ({ productId }) =
 
   const handleDelete = async (reviewId: string) => {
     if (!isAdmin) return;
-    const path = `reviews/${reviewId}`;
     try {
-      await deleteDoc(doc(db, 'reviews', reviewId));
+      const { error } = await supabase.from('reviews').delete().eq('id', reviewId);
+      if (error) throw error;
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
+      console.error('Error deleting review:', error);
     }
   };
 

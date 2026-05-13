@@ -8,9 +8,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
-import { db, handleFirestoreError, OperationType } from '../lib/firebase';
-import { collection, onSnapshot } from 'firebase/firestore';
 import { Product } from '../lib/utils';
+import { supabase } from '../lib/supabaseClient';
 
 export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () => void }, { onCartOpen: () => void; onFilterOpen?: () => void }>(({ onCartOpen, onFilterOpen }, ref) => {
   const { mode, setMode, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory } = useShop();
@@ -22,7 +21,6 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [searchSuggestions, setSearchSuggestions] = useState<Product[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
-  const [allProducts, setAllProducts] = useState<Product[]>([]);
   const [isDark, setIsDark] = useState(() => {
     const saved = localStorage.getItem('theme');
     if (saved) return saved === 'dark';
@@ -91,37 +89,35 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
   }, [isDark]);
 
   useEffect(() => {
-    const path = 'products';
-    const unsubscribe = onSnapshot(collection(db, path), (snapshot) => {
-      const productsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as Product[];
-      setAllProducts(productsData);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, path);
-    });
+    const fetchSuggestions = async () => {
+      if (searchQuery.length > 1) {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .eq('type', mode)
+          .or(`name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%,article.ilike.%${searchQuery}%`)
+          .limit(8);
 
-    return () => unsubscribe();
-  }, []);
+        if (error) {
+          console.error('Error fetching search suggestions:', error);
+          return;
+        }
 
-  useEffect(() => {
-    if (searchQuery.length > 1) {
-      const filtered = allProducts
-        .filter(p => p.type === mode)
-        .filter(p => 
-          p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (p.brand && p.brand.toLowerCase().includes(searchQuery.toLowerCase()))
-        )
-        .slice(0, 8);
-      setSearchSuggestions(filtered);
-      setShowSuggestions(true);
-      setActiveSuggestionIndex(-1);
-    } else {
-      setSearchSuggestions([]);
-      setShowSuggestions(false);
-    }
-  }, [searchQuery, allProducts, mode]);
+        if (data) {
+          const mapped = data.map(item => ({ ...item, image: item.image_url })) as Product[];
+          setSearchSuggestions(mapped);
+          setShowSuggestions(true);
+          setActiveSuggestionIndex(-1);
+        }
+      } else {
+        setSearchSuggestions([]);
+        setShowSuggestions(false);
+      }
+    };
+
+    const timer = setTimeout(fetchSuggestions, 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery, mode]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
