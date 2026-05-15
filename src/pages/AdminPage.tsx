@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck, Bell } from 'lucide-react';
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
 import * as XLSX from 'xlsx';
@@ -31,6 +31,46 @@ export const AdminPage: React.FC = () => {
   const [selectedProducts, setSelectedProducts] = useState<(string | number)[]>([]);
   const [heroContent, setHeroContent] = useState<any>(null);
   const [isSyncingUTR, setIsSyncingUTR] = useState(false);
+  const [newOrderNotification, setNewOrderNotification] = useState<any>(null);
+  const [isRealtimeEnabled, setIsRealtimeEnabled] = useState(true);
+
+  // Sound for notification
+  const playNotificationSound = () => {
+    try {
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.play().catch(e => console.log('Sound play blocked by browser', e));
+    } catch (e) {}
+  };
+
+  useEffect(() => {
+    // Subscribe to new orders
+    const channel = supabase
+      .channel('orders-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders'
+        },
+        (payload) => {
+          console.log('New order received!', payload);
+          setNewOrderNotification(payload.new);
+          playNotificationSound();
+          refreshAllData(); // Refresh list to show new order
+          
+          // Auto-hide after 10 seconds
+          setTimeout(() => {
+            setNewOrderNotification(null);
+          }, 10000);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
   const [isImporting, setIsImporting] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importStats, setImportStats] = useState({ current: 0, total: 0 });
@@ -1474,6 +1514,63 @@ export const AdminPage: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Real-time Order Notification */}
+      <AnimatePresence>
+        {newOrderNotification && (
+          <motion.div 
+            initial={{ opacity: 0, y: -100, x: '-50%' }}
+            animate={{ opacity: 1, y: 32, x: '-50%' }}
+            exit={{ opacity: 0, y: -100, x: '-50%' }}
+            className="fixed top-0 left-1/2 z-[300] w-full max-w-md px-4"
+          >
+            <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl border border-blue-500/30 overflow-hidden ring-1 ring-blue-500/20">
+              <div className="p-6 flex items-start space-x-4">
+                <div className="bg-blue-600 p-3 rounded-2xl text-white shadow-lg shadow-blue-500/30 animate-bounce">
+                  <Bell size={24} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between mb-1">
+                    <h3 className="text-lg font-black text-gray-900 dark:text-white">Нове замовлення!</h3>
+                    <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2 py-0.5 rounded">Зараз</span>
+                  </div>
+                  <p className="text-sm text-gray-600 dark:text-gray-400 font-bold mb-1">
+                    Від: {newOrderNotification.phone}
+                  </p>
+                  <p className="text-xs text-gray-500 truncate mb-3">
+                    Сума: <span className="text-blue-600 font-bold">{newOrderNotification.total_price} грн</span>
+                  </p>
+                  <div className="flex space-x-3">
+                    <button 
+                      onClick={() => {
+                        setActiveTab('orders');
+                        setNewOrderNotification(null);
+                      }}
+                      className="px-4 py-2 bg-blue-600 text-white text-xs font-bold rounded-xl hover:bg-blue-700 transition-all flex-1"
+                    >
+                      Переглянути
+                    </button>
+                    <button 
+                      onClick={() => setNewOrderNotification(null)}
+                      className="px-4 py-2 bg-gray-50 dark:bg-gray-700 text-gray-500 dark:text-gray-300 text-xs font-bold rounded-xl hover:bg-gray-100 transition-all"
+                    >
+                      Закрити
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div className="h-1 bg-blue-600/10 w-full overflow-hidden">
+                <motion.div 
+                  initial={{ width: '100%' }}
+                  animate={{ width: '0%' }}
+                  transition={{ duration: 10, ease: 'linear' }}
+                  className="h-full bg-blue-600"
+                />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      
       {/* Edit Product Modal */}
       <AnimatePresence>
         {editingProduct && (
@@ -2547,6 +2644,16 @@ export const AdminPage: React.FC = () => {
                       >
                         <Wand2 size={12} />
                         ТЕСТУВАТИ З'ЄДНАННЯ (ДЕТАЛЬНО)
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          navigator.clipboard.writeText(`ALTER PUBLICATION supabase_realtime ADD TABLE orders;`);
+                          alert('SQL скопійовано! Запустіть це в SQL Editor, щоб включити Realtime для замовлень.');
+                        }}
+                        className="w-full py-2 bg-purple-600 text-white rounded-lg text-[10px] font-bold hover:bg-purple-700 flex items-center justify-center gap-2"
+                      >
+                        <Bell size={12} />
+                        УВІМКНУТИ REALTIME (SQL)
                       </button>
                     </div>
                   </div>
