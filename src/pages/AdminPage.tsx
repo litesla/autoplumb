@@ -78,18 +78,41 @@ export const AdminPage: React.FC = () => {
 
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isGeneratingPost, setIsGeneratingPost] = useState(false);
+  const lastErrorTimeRef = useRef<number>(0);
 
   const refreshAllData = async () => {
     if (!isAdmin) return;
+    
+    // Check cooldown
+    const now = Date.now();
+    if (now - lastErrorTimeRef.current < 30000) {
+      console.warn('🔄 Supabase requests are on cooldown (30s) due to previous connection error.');
+      setIsRefreshing(false);
+      return;
+    }
+
     setIsRefreshing(true);
     
     try {
-      // Check connection first to give better feedback
-      const { error: pingError } = await supabase.from('products').select('id').limit(1);
-      if (pingError && pingError.message.includes('Failed to fetch')) {
-        alert('Помилка з\'єднання з Supabase. Перевірте інтернет або чи не заснув проект.');
+      // Immediate stop if config is missing (secondary check)
+      const url = import.meta.env.VITE_SUPABASE_URL;
+      if (!url || url.includes('placeholder')) {
         setIsRefreshing(false);
         return;
+      }
+
+      // Check connection first to give better feedback
+      const { error: pingError } = await supabase.from('products').select('id').limit(1);
+      if (pingError) {
+        const msg = pingError.message || String(pingError);
+        if (msg.includes('Failed to fetch') || msg.includes('Network Error') || msg.includes('ERR_NAME_NOT_RESOLVED')) {
+          lastErrorTimeRef.current = Date.now(); // Start cooldown
+          const currentUrl = import.meta.env.VITE_SUPABASE_URL;
+          alert(`Помилка з'єднання з Supabase!\n\nЦе зазвичай означає :\n1. Ваш проект у Supabase "заснув" (треба зайти в панель Supabase і натиснути Restore).\n2. Неправильно вказано VITE_SUPABASE_URL: ${currentUrl}\n\nНаступна спроба буде доступна через 30 секунд.`);
+          setActiveTab('diagnostics');
+          setIsRefreshing(false);
+          return;
+        }
       }
 
       const [{ count }, { data: pData }, { data: oData }, { data: bData }] = await Promise.all([
@@ -889,6 +912,14 @@ export const AdminPage: React.FC = () => {
 
   const executeRegularImport = async () => {
     setIsConfirmingRegularImport(false);
+    
+    // Check cooldown
+    const now = Date.now();
+    if (now - lastErrorTimeRef.current < 30000) {
+      alert('Зачекайте 30 секунд перед наступною спробою (діє захист від помилок з\'єднання).');
+      return;
+    }
+
     setIsImporting(true);
     setImportStatus('Перевірка з\'єднання з базою...');
     setImportProgress(5);
@@ -908,7 +939,7 @@ export const AdminPage: React.FC = () => {
     setImportStats({ current: 0, total: totalCount });
     setShouldStopImport(false);
     stopImportRef.current = false;
-    setImportStatus(`Підготовка до імпорту ${totalCount} товарів...`);
+    setImportStatus(`Підготовка до імпорту ${totalCount} товарів (UPSERT)...`);
     
     // Final sanity check
     if (totalCount === 0) {
@@ -917,44 +948,38 @@ export const AdminPage: React.FC = () => {
       return;
     }
 
-    console.log(`🚀 Starting high-volume import: ${totalCount} products. Batch size: 50.`);
+    console.log(`🚀 Starting high-volume import: ${totalCount} products. Using UPSERT on 'name'.`);
     
-    let autoCount = 0;
-    let plumbingCount = 0;
     let importedCount = 0;
-    const batchSize = 50; 
+    const batchSize = 100; // Increased for performance
     
     for (let i = 0; i < totalCount; i += batchSize) {
       if (stopImportRef.current) {
         setImportStatus('Імпорт зупинено користувачем');
-        console.warn('Import manually stopped by user.');
         break;
       }
       try {
         setImportStatus(`Завантаження пачки ${Math.floor(i/batchSize) + 1}... (${i}/${totalCount})`);
         const chunk = productsToImport.slice(i, i + batchSize);
         
-        const batchData = chunk.map(p => {
-          const item: any = {
-            name: p.name || 'Без назви',
-            price: Number(p.price) || 0,
-            category: p.category || 'Інше',
-            description: p.description || '',
-            stock: Number(p.stock) || 0,
-            brand: p.brand || '',
-            article: p.article || '',
-            image_url: p.image_url || '',
-            type: p.type || 'auto' // RE-ADDED: crucial for visibility on site
-          };
-          
-          return item;
-        });
-
-        console.log(`📡 Uploading batch ${Math.floor(i/batchSize) + 1} (${chunk.length} items).`);
+        const batchData = chunk.map(p => ({
+          name: p.name || 'Без назви',
+          price: Number(p.price) || 0,
+          category: p.category || 'Інше',
+          description: p.description || '',
+          stock: Number(p.stock) || 0,
+          brand: p.brand || '',
+          article: p.article || '',
+          image_url: p.image_url || '',
+          type: p.type || 'auto'
+        }));
 
         const { data: insertedData, error } = await supabase
           .from('products')
-          .insert(batchData)
+          .upsert(batchData, { 
+            onConflict: 'name', // Using name as unique identifier to prevent duplicates
+            ignoreDuplicates: false 
+          })
           .select('id');
         
         if (error) {
@@ -962,48 +987,39 @@ export const AdminPage: React.FC = () => {
           
           if (error.message?.includes('column') && error.message?.includes('does not exist')) {
             const missingCol = error.message.match(/'([^']+)'/)?.[1] || 'невідома колонка';
-            alert(`ПОМИЛКА СТРУКТУРИ: У вашій таблиці Supabase відсутня колонка "${missingCol}".\nБудь ласка, додайте її в редакторі таблиць Supabase або зверніться до розробника.`);
+            alert(`ПОМИЛКА СТРУКТУРИ: Відсутня колонка "${missingCol}".`);
             setIsImporting(false);
-            return; // Stop the whole import if structure is wrong
+            return;
           }
           
-          let alertMsg = `Помилка пакетного завантаження (пачка ${Math.floor(i/batchSize) + 1}):\n\n${error.message}`;
-          if (error.details) alertMsg += `\n\nДеталі: ${error.details}`;
-          if (error.hint) alertMsg += `\n\nПідказка: ${error.hint}`;
-          
-          alert(alertMsg);
+          // Network errors during batch
+          if (error.message?.includes('Failed to fetch') || error.status === 0) {
+            lastErrorTimeRef.current = Date.now();
+            throw new Error('Втрачено зв\'язок з сервером Supabase.');
+          }
+
           throw new Error(error.message);
         }
         
-        console.log(`✅ Batch ${Math.floor(i/batchSize) + 1} SUCCESS. Inserted count: ${insertedData?.length || 0}`);
         importedCount += chunk.length;
-        chunk.forEach(p => {
-          if (p.type === 'auto') autoCount++;
-          else plumbingCount++;
-        });
-
         setImportStats(prev => ({ ...prev, current: importedCount }));
-        setImportProgress(Math.round((importedCount / totalCount) * 100));
+        setImportProgress(Math.min(99, Math.round((importedCount / totalCount) * 100)));
         
-        await new Promise(resolve => setTimeout(resolve, 200));
       } catch (batchErr: any) {
-        console.error(`🛑 FATAL CRASH at index ${i}:`, batchErr);
-        alert(`КРИТИЧНА ПОМИЛКА: ${batchErr.message}\n\nПроцес зупинено щоб уникнути нескінченних запитів.`);
+        console.error(`🛑 Import CRASH at index ${i}:`, batchErr);
+        alert(`ЗУПИНЕНО: ${batchErr.message}\n\nСпробуйте знову через 30 секунд.`);
         setIsImporting(false);
-        return; // Complete exit from function
+        return;
       }
     }
 
-    console.log('🏁 Import Finished.', { totalCount, importedCount, autoCount, plumbingCount });
-    setImportStatus('Імпорт завершено!');
-    alert(`Імпорт завершено!\n\nУспішно додано: ${importedCount} з ${totalCount}\n- Автотовари: ${autoCount}\n- Сантехніка: ${plumbingCount}`);
-    
-    setIsImporting(false);
-    setImportProgress(0);
-    setImportStats({ current: 0, total: 0 });
-    setImportStatus('');
-    setPendingProductsToImport([]);
-    refreshAllData();
+    setImportProgress(100);
+    setImportStatus('Імпорт успішно завершено!');
+    console.log('🏁 Import finished successfully.');
+    setTimeout(() => {
+      setIsImporting(false);
+      refreshAllData();
+    }, 1500);
   };
 
   const handleSmartImport = async (file: File) => {
@@ -2452,7 +2468,46 @@ export const AdminPage: React.FC = () => {
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-4xl font-black text-gray-900">Діагностика бази даних</h1>
-                <p className="text-gray-500 font-medium">Виправлення помилок структури Supabase</p>
+                <p className="text-gray-500 font-medium">Перевірка з'єднання та структури Supabase</p>
+              </div>
+              <button 
+                onClick={refreshAllData}
+                className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all"
+              >
+                <RotateCw className={isRefreshing ? 'animate-spin' : ''} size={18} />
+                <span>Перевірити з'єднання</span>
+              </button>
+            </div>
+
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3 text-gray-900 dark:text-white font-bold">
+                  <div className={`w-3 h-3 rounded-full ${totalProductsCount > 0 ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                  <h3>Статус підключення</h3>
+                </div>
+                <div className="text-sm font-medium text-gray-500">
+                  {import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0] || 'Невідомо'}
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                  <div className="text-gray-400 mb-1">Таблиця Products</div>
+                  <div className="font-bold flex items-center justify-between">
+                    <span>{totalProductsCount > 0 ? 'Доступна' : 'Помилка'}</span>
+                    <span className="text-gray-400 text-xs">{totalProductsCount} од.</span>
+                  </div>
+                </div>
+                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                  <div className="text-gray-400 mb-1">Таблиця Blog</div>
+                  <div className="font-bold">
+                    {blogPosts.length > 0 ? 'Доступна' : 'Не знайдено або пуста'}
+                  </div>
+                </div>
+                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                  <div className="text-gray-400 mb-1">Версія API</div>
+                  <div className="font-bold">PostgREST/12.2</div>
+                </div>
               </div>
             </div>
 

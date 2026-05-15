@@ -10,9 +10,21 @@ export async function createExpressApp() {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
   const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || "";
   
+  const isConfigMissing = !supabaseUrl || !supabaseKey || supabaseUrl.includes('placeholder') || supabaseUrl === '111';
+
   // Safe URL to prevent crash
-  const safeUrl = supabaseUrl && supabaseUrl.startsWith('http') ? supabaseUrl : 'https://placeholder.supabase.co';
-  const supabase = createClient(safeUrl, supabaseKey || "placeholder");
+  const safeUrl = (supabaseUrl && supabaseUrl.startsWith('http')) ? supabaseUrl : 'https://qllpxployhzizlicxbss.supabase.co';
+  const supabase = createClient(safeUrl, supabaseKey || "placeholder", {
+    global: {
+      fetch: (...args) => {
+        if (isConfigMissing) {
+          console.error('🚫 Server-side: Blocked Supabase request due to missing configuration.');
+          return Promise.reject(new Error('Supabase configuration missing'));
+        }
+        return fetch(...args);
+      }
+    }
+  });
 
   app.use(express.json());
 

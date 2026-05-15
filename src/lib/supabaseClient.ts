@@ -1,16 +1,33 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
 
-if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder') || supabaseUrl === '111') {
-  console.warn('⚠️ SUPABASE CONFIGURATION MISSING OR INVALID!');
-  console.log('Current URL:', supabaseUrl || 'UNDEFINED');
-  console.log('Current Key:', supabaseAnonKey ? `DEFINED (Prefix: ${supabaseAnonKey.substring(0, 5)}...)` : 'UNDEFINED');
-  console.log('Please add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY to your environment variables in AI Studio Settings -> Secrets.');
+// Loop prevention: check if keys are placeholders or missing
+const isConfigMissing = !supabaseUrl || !supabaseAnonKey || 
+                        supabaseUrl.includes('placeholder') || 
+                        supabaseUrl.includes('missing-supabase-url') ||
+                        supabaseUrl === '111';
+
+if (isConfigMissing) {
+  console.warn('⚠️ Supabase config is missing or invalid. Requests are blocked.');
 }
 
-// Ensure the URL is valid or fallback to a known non-crashing but failing-on-fetch URL
-const finalUrl = (supabaseUrl && supabaseUrl.startsWith('http')) ? supabaseUrl : 'https://missing-supabase-url.supabase.co';
+// Ensure the URL is valid or fallback to a known non-crashing URL
+const finalUrl = (supabaseUrl && supabaseUrl.startsWith('http')) ? supabaseUrl : 'https://qllpxployhzizlicxbss.supabase.co';
 
-export const supabase = createClient(finalUrl, supabaseAnonKey || 'missing-key');
+export const supabase = createClient(finalUrl, supabaseAnonKey || 'missing-key', {
+  auth: {
+    persistSession: true,
+    autoRefreshToken: true,
+  },
+  global: {
+    fetch: (...args) => {
+      if (isConfigMissing) {
+        console.error('🚫 Blocked Supabase request due to missing configuration.');
+        return Promise.reject(new Error('Supabase configuration missing'));
+      }
+      return fetch(...args);
+    }
+  }
+});
