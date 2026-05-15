@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert } from 'lucide-react';
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
 import * as XLSX from 'xlsx';
@@ -40,9 +40,30 @@ export const AdminPage: React.FC = () => {
   const [shouldStopImport, setShouldStopImport] = useState(false);
   const stopImportRef = React.useRef(false);
   const [isAiMapping, setIsAiMapping] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [pendingImportData, setPendingImportData] = useState<any[] | null>(null);
   const [pendingProductsToImport, setPendingProductsToImport] = useState<any[]>([]);
   const [detectedMapping, setDetectedMapping] = useState<ColumnMapping | null>(null);
+  const [customDbUrl, setCustomDbUrl] = useState(localStorage.getItem('supabase_url') || '');
+  const [customDbKey, setCustomDbKey] = useState(localStorage.getItem('supabase_key') || '');
+
+  const saveCustomConfig = () => {
+    if (!customDbUrl || !customDbKey) {
+      alert('Будь ласка, введіть і URL, і Key');
+      return;
+    }
+    localStorage.setItem('supabase_url', customDbUrl.trim());
+    localStorage.setItem('supabase_key', customDbKey.trim());
+    alert('Конфігурацію збережено! Перезавантажую сторінку...');
+    window.location.reload();
+  };
+
+  const resetConfig = () => {
+    localStorage.removeItem('supabase_url');
+    localStorage.removeItem('supabase_key');
+    alert('Скинуто до системних налаштувань. Перезавантажую...');
+    window.location.reload();
+  };
   const [newProduct, setNewProduct] = useState({
     name: '',
     price: 0,
@@ -80,6 +101,20 @@ export const AdminPage: React.FC = () => {
   const [isGeneratingPost, setIsGeneratingPost] = useState(false);
   const lastErrorTimeRef = useRef<number>(0);
 
+  const checkSupabaseConnection = async () => {
+    try {
+      const { error } = await supabase.from('products').select('*', { count: 'exact', head: true });
+      if (error) {
+        setFetchError(error.message);
+        return false;
+      }
+      return true;
+    } catch (e: any) {
+      setFetchError(e.message || 'Connection failed');
+      return false;
+    }
+  };
+
   const refreshAllData = async () => {
     if (!isAdmin) return;
     
@@ -94,53 +129,40 @@ export const AdminPage: React.FC = () => {
     setIsRefreshing(true);
     
     try {
-      // Immediate stop if config is missing (secondary check)
-      const url = import.meta.env.VITE_SUPABASE_URL;
-      if (!url || url.includes('placeholder')) {
-        setIsRefreshing(false);
-        return;
-      }
-
-      // Check connection first to give better feedback
-      const { error: pingError } = await supabase.from('products').select('id').limit(1);
-      if (pingError) {
-        const msg = pingError.message || String(pingError);
-        if (msg.includes('Failed to fetch') || msg.includes('Network Error') || msg.includes('ERR_NAME_NOT_RESOLVED')) {
-          lastErrorTimeRef.current = Date.now(); // Start cooldown
-          const currentUrl = import.meta.env.VITE_SUPABASE_URL;
-          alert(`Помилка з'єднання з Supabase!\n\nЦе зазвичай означає :\n1. Ваш проект у Supabase "заснув" (треба зайти в панель Supabase і натиснути Restore).\n2. Неправильно вказано VITE_SUPABASE_URL: ${currentUrl}\n\nНаступна спроба буде доступна через 30 секунд.`);
-          setActiveTab('diagnostics');
-          setIsRefreshing(false);
-          return;
-        }
-      }
-
-      const [{ count }, { data: pData }, { data: oData }, { data: bData }] = await Promise.all([
+      const [resCount, resProducts, resOrders, resBlog] = await Promise.all([
         supabase.from('products').select('*', { count: 'exact', head: true }),
         supabase.from('products').select('*').order('created_at', { ascending: false }).limit(100),
         supabase.from('orders').select('*').order('created_at', { ascending: false }),
         supabase.from('blog').select('*').order('created_at', { ascending: false })
       ]);
 
-      if (count !== null) setTotalProductsCount(count);
+      const errors = [resCount.error, resProducts.error, resOrders.error, resBlog.error].filter(Boolean);
+      if (errors.length > 0) {
+        console.error('Supabase errors detected:', errors);
+        setFetchError(errors[0]?.message || 'Unknown error');
+      } else {
+        setFetchError(null);
+      }
+
+      if (resCount.count !== null) setTotalProductsCount(resCount.count);
       
-      if (pData) {
-        setProducts(pData.map(item => ({ 
+      if (resProducts.data) {
+        setProducts(resProducts.data.map(item => ({ 
           ...item, 
           image: item.image_url || item.image || '',
-          type: item.type || 'auto' // Fallback for products without type
+          type: item.type || 'auto' 
         })) as Product[]);
       }
 
-      if (oData) {
-        setOrders(oData.map(o => ({
+      if (resOrders.data) {
+        setOrders(resOrders.data.map(o => ({
           ...o,
           items: typeof o.items === 'string' ? JSON.parse(o.items) : o.items
         })) as Order[]);
       }
 
-      if (bData) {
-        setBlogPosts(bData.map(post => ({
+      if (resBlog.data) {
+        setBlogPosts(resBlog.data.map(post => ({
           ...post,
           image: (post as any).image_url || (post as any).image || '',
           readTime: (post as any).read_time || (post as any).readTime || '',
@@ -150,8 +172,9 @@ export const AdminPage: React.FC = () => {
 
       fetchSettings();
       fetchHeroContent();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error refreshing admin data:', err);
+      setFetchError(err.message || 'Помилка підключення до Supabase');
     } finally {
       setIsRefreshing(false);
     }
@@ -843,73 +866,6 @@ export const AdminPage: React.FC = () => {
     reader.readAsArrayBuffer(file);
   };
 
-  const checkSupabaseConnection = async () => {
-    const url = import.meta.env.VITE_SUPABASE_URL || '';
-    const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-    const currentHost = window.location.hostname;
-    
-    if (!url || url.includes('missing-supabase-url') || url === '111') {
-      let advice = 'Додайте VITE_SUPABASE_URL та VITE_SUPABASE_ANON_KEY у налаштуваннях.';
-      if (currentHost.includes('netlify.app')) {
-        advice = 'Ви на Netlify. Будь ласка, перейдіть у налаштування сайту (Site Settings → Environment Variables) і додайте ці змінні там.';
-      } else if (currentHost.includes('google.com') || currentHost.includes('ais-dev')) {
-        advice = 'Встановіть справжні URL та Key у Settings → Secrets в AI Studio.';
-      }
-      
-      alert(`Supabase не налаштовано!\n\n${advice}`);
-      setActiveTab('diagnostics');
-      return false;
-    }
-
-    try {
-      console.log('🔍 Checking Supabase connection details...');
-      console.log('Host:', currentHost);
-      console.log('URL:', url);
-      console.log('Key prefix:', anonKey.substring(0, 15) + '...');
-
-      if (!url.startsWith('https://') || !url.includes('.supabase.co')) {
-        alert(`УВАГА! Ваш Supabase URL виглядає некоректним: "${url}"\n\nВін зазвичай починається з "https://" і закінчується на ".supabase.co".`);
-        setActiveTab('diagnostics');
-        return false;
-      }
-
-      if (url === '111' || anonKey.includes('111')) {
-        alert('УВАГА! У ваших секретах (Settings → Secrets) встановлено значення "111".\n\nБудь ласка, видаліть їх або встановіть реальні URL та Key від Supabase.');
-        return false;
-      }
-
-      if (anonKey.startsWith('pk_test_') || anonKey.startsWith('pk_live_')) {
-        alert('УВАГА! Схоже, ви вказали Stripe-ключ (pk_...) замість Supabase Anon Key.');
-        return false;
-      }
-
-      // Increased timeout to 45s for free-tier hibernation wake up
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Перевищено час очікування відповіді від Supabase (45с). Проект міг "заснути" або URL невірний.')), 45000)
-      );
-      
-      const connectionPromise = supabase.from('products').select('id', { count: 'exact', head: true }).limit(1);
-      
-      const { error } = await Promise.race([connectionPromise, timeoutPromise]) as any;
-      if (error) {
-        console.error('Supabase error detail:', error);
-        throw error;
-      }
-      
-      return true;
-    } catch (err: any) {
-      console.error('Supabase connection check failed:', err);
-      const msg = err.message || String(err);
-      if (msg.includes('Failed to fetch') || err.name === 'TypeError') {
-        const currentUrl = import.meta.env.VITE_SUPABASE_URL;
-        alert(`Помилка з'єднання ("Failed to fetch")!\n\nЦе означає, що браузер не може зв'язатися з Supabase.\nВаш поточний URL: ${currentUrl}\n\nЯКЩО URL ВЕРНИЙ: Спробуйте вимкнути VPN або змінити браузер.\nЯКЩО URL НЕВІРНИЙ: Виправте його в налаштуваннях (Settings → Secrets).`);
-      } else {
-        alert(`Помилка підключення: ${msg}`);
-      }
-      return false;
-    }
-  };
-
   const executeRegularImport = async () => {
     setIsConfirmingRegularImport(false);
     
@@ -921,17 +877,9 @@ export const AdminPage: React.FC = () => {
     }
 
     setIsImporting(true);
-    setImportStatus('Перевірка з\'єднання з базою...');
+    setImportStatus('Початок імпорту...');
     setImportProgress(5);
     
-    // Check connection first
-    const isConnected = await checkSupabaseConnection();
-    
-    if (!isConnected) {
-      setIsImporting(false);
-      return;
-    }
-
     const productsToImport = pendingProductsToImport;
     const totalCount = productsToImport.length;
     
@@ -993,7 +941,7 @@ export const AdminPage: React.FC = () => {
           }
           
           // Network errors during batch
-          if (error.message?.includes('Failed to fetch') || error.status === 0) {
+          if (error.message?.includes('Failed to fetch') || (error as any).status === 0) {
             lastErrorTimeRef.current = Date.now();
             throw new Error('Втрачено зв\'язок з сервером Supabase.');
           }
@@ -2472,108 +2420,152 @@ export const AdminPage: React.FC = () => {
               </div>
               <button 
                 onClick={refreshAllData}
-                className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all"
+                className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all font-mono text-sm"
               >
                 <RotateCw className={isRefreshing ? 'animate-spin' : ''} size={18} />
-                <span>Перевірити з'єднання</span>
+                <span>REFRESH_DIAGNOSTICS</span>
               </button>
             </div>
 
-            <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center space-x-3 text-gray-900 dark:text-white font-bold">
-                  <div className={`w-3 h-3 rounded-full ${totalProductsCount > 0 ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                  <h3>Статус підключення</h3>
-                </div>
-                <div className="text-sm font-medium text-gray-500">
-                  {import.meta.env.VITE_SUPABASE_URL?.split('//')[1]?.split('.')[0] || 'Невідомо'}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 mb-8">
+              <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+                <h3 className="text-xl font-black mb-6 flex items-center gap-3">
+                  <Settings className="text-blue-600" />
+                  Ваші налаштування Supabase
+                </h3>
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Supabase Project URL</label>
+                    <input 
+                      type="text" 
+                      value={customDbUrl}
+                      onChange={(e) => setCustomDbUrl(e.target.value)}
+                      placeholder="https://your-project.supabase.co"
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-sm focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Anon Public Key</label>
+                    <textarea 
+                      value={customDbKey}
+                      onChange={(e) => setCustomDbKey(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      rows={3}
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-sm focus:ring-2 focus:ring-blue-500 resize-none"
+                    />
+                  </div>
+                  <div className="flex gap-4">
+                    <button 
+                      onClick={saveCustomConfig}
+                      className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
+                    >
+                      ПІДКЛЮЧИТИ МОЮ БАЗУ
+                    </button>
+                    <button 
+                      onClick={resetConfig}
+                      className="px-6 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold hover:bg-gray-200 transition-all"
+                      title="Скинути до стандартних"
+                    >
+                      <RotateCw size={20} />
+                    </button>
+                  </div>
+                  <p className="text-[10px] text-gray-400 text-center italic">
+                    Дані зберігаються тільки у вашому браузері (localStorage).
+                  </p>
                 </div>
               </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
-                  <div className="text-gray-400 mb-1">Таблиця Products</div>
-                  <div className="font-bold flex items-center justify-between">
-                    <span>{totalProductsCount > 0 ? 'Доступна' : 'Помилка'}</span>
-                    <span className="text-gray-400 text-xs">{totalProductsCount} од.</span>
+
+              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+                <h3 className="text-xl font-black mb-6 flex items-center gap-3">
+                  <ShieldAlert className="text-blue-600" />
+                  Статус
+                </h3>
+                <div className="space-y-4">
+                  <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                    <div className="text-[10px] text-gray-400 uppercase font-black mb-1">Поточний URL:</div>
+                    <div className="font-mono text-[10px] break-all text-blue-600 font-bold leading-tight">
+                      {localStorage.getItem('supabase_url') || 'Системний проект (qllpx...)'}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
+                    <div className="text-[10px] text-gray-400 uppercase font-black mb-1">Статус запиту:</div>
+                    <div className="font-bold flex flex-col space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span className={totalProductsCount > 0 ? 'text-green-600' : 'text-red-500'}>
+                          {totalProductsCount > 0 ? 'Дані отримано' : fetchError ? 'ПОМИЛКА ЗАПИТУ' : 'ПОРOЖНЯ БАЗА'}
+                        </span>
+                        <span className="bg-white px-2 py-0.5 rounded border text-xs">{totalProductsCount} товарів</span>
+                      </div>
+                      {fetchError && (
+                        <div className="text-[10px] text-red-600 bg-red-50 p-2 rounded-lg break-all mt-2 border border-red-100">
+                          <b>Помилка:</b> {fetchError}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="p-4 bg-amber-50 rounded-2xl border border-amber-100">
+                    <p className="text-xs text-amber-700 leading-relaxed font-medium mb-3">
+                      <b>Порада:</b> Якщо товарів 0, а помилки вище немає — база дійсно порожня. 
+                      Зробіть імпорт у вкладці "Товари". Якщо є помилка <b>"401/403"</b> — ваш ключ <code>anon</code> невірний.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                       <button 
+                        onClick={async () => {
+                          const { data, error } = await supabase.from('products').select('*').limit(1);
+                          if (error) {
+                            alert(`Error detail: ${JSON.stringify(error, null, 2)}`);
+                          } else {
+                            alert(`Success! Data received: ${JSON.stringify(data, null, 2)}`);
+                          }
+                        }}
+                        className="w-full py-2 bg-blue-600 text-white rounded-lg text-[10px] font-bold hover:bg-blue-700 flex items-center justify-center gap-2"
+                      >
+                        <Wand2 size={12} />
+                        ТЕСТУВАТИ З'ЄДНАННЯ (ДЕТАЛЬНО)
+                      </button>
+                    </div>
                   </div>
                 </div>
-                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
-                  <div className="text-gray-400 mb-1">Таблиця Blog</div>
-                  <div className="font-bold">
-                    {blogPosts.length > 0 ? 'Доступна' : 'Не знайдено або пуста'}
+              </div>
+
+              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+                <h3 className="text-xl font-black mb-6 flex items-center gap-3 text-red-500">
+                  <ShieldAlert />
+                  Рішення "0 товарів"
+                </h3>
+                <div className="space-y-4">
+                  <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Якщо в базі Є товари, але ви бачите 0 — це <b>RLS (Row Level Security)</b>. 
+                    Скопіюйте SQL нижче, зайдіть в <b>SQL Editor</b> у Supabase і виконайте його:
+                  </p>
+                  <div className="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-[10px] leading-relaxed">
+                    ALTER TABLE products DISABLE ROW LEVEL SECURITY;
                   </div>
-                </div>
-                <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
-                  <div className="text-gray-400 mb-1">Версія API</div>
-                  <div className="font-bold">PostgREST/12.2</div>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(`ALTER TABLE products DISABLE ROW LEVEL SECURITY;`);
+                      alert('SQL скопійовано! Зайдіть у Supabase -> SQL Editor -> Новий запит -> Вставте і натисніть Run.');
+                    }}
+                    className="w-full py-4 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    Скопіювати SQL для вимкнення RLS
+                  </button>
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
-                <div className="flex items-center space-x-3 mb-6 text-blue-600 font-bold">
-                  <Package size={24} />
-                  <h3>Таблиця Products</h3>
-                </div>
-                <div className="space-y-4">
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">Якщо ви бачите помилку <b>"column 'type' does not exist"</b>, виконайте цей SQL запит у вашій SQL-панелі Supabase:</p>
-                  <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto">
-                    {`-- Додати колонку type
-ALTER TABLE products ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'auto';
-
--- Додати колонку brand
-ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT;
-
--- Додати колонку article
-ALTER TABLE products ADD COLUMN IF NOT EXISTS article TEXT;
-
--- Додати колонку image_url (якщо немає)
-ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`}
-                  </pre>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(`ALTER TABLE products ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'auto';\nALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT;\nALTER TABLE products ADD COLUMN IF NOT EXISTS article TEXT;\nALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`);
-                      alert('SQL скопійовано!');
-                    }}
-                    className="w-full py-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl font-bold text-sm hover:bg-blue-100 dark:hover:bg-blue-800/50 transition-all"
-                  >
-                    Скопіювати SQL
-                  </button>
-                </div>
+            <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
+              <div className="flex items-center space-x-3 mb-6 text-blue-600 font-bold">
+                <Package size={24} />
+                <h3>Базовий SQL для структури</h3>
               </div>
-
-              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
-                <div className="flex items-center space-x-3 mb-6 text-purple-600 font-bold">
-                  <BookOpen size={24} />
-                  <h3>Таблиця Blog</h3>
-                </div>
-                <div className="space-y-4">
-                  <p className="text-gray-600 dark:text-gray-400 text-sm">Якщо блок або статті не працюють, створіть таблицю <b>blog</b> цим запитом:</p>
-                  <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto">
-                    {`CREATE TABLE IF NOT EXISTS blog (
-  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  title TEXT NOT NULL,
-  excerpt TEXT,
-  content TEXT,
-  author TEXT,
-  category TEXT,
-  read_time TEXT,
-  image_url TEXT,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);`}
-                  </pre>
-                  <button 
-                    onClick={() => {
-                      navigator.clipboard.writeText(`CREATE TABLE IF NOT EXISTS blog (\n  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,\n  title TEXT NOT NULL,\n  excerpt TEXT,\n  content TEXT,\n  author TEXT,\n  category TEXT,\n  read_time TEXT,\n  image_url TEXT,\n  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()\n);`);
-                      alert('SQL скопійовано!');
-                    }}
-                    className="w-full py-3 bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-xl font-bold text-sm hover:bg-purple-100 dark:hover:bg-purple-800/50 transition-all"
-                  >
-                    Скопіювати SQL
-                  </button>
-                </div>
+              <div className="space-y-4">
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto min-h-[100px]">
+                  {`ALTER TABLE products ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'auto';
+ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS article TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`}
+                </pre>
               </div>
             </div>
 

@@ -1,33 +1,21 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
+// Use keys from localStorage (set via Admin Diagnostics) OR environment variables OR hardcoded default
+const getSupabaseConfig = () => {
+  const localUrl = typeof window !== 'undefined' ? localStorage.getItem('supabase_url') : null;
+  const localKey = typeof window !== 'undefined' ? localStorage.getItem('supabase_key') : null;
 
-// Loop prevention: check if keys are placeholders or missing
-const isConfigMissing = !supabaseUrl || !supabaseAnonKey || 
-                        supabaseUrl.includes('placeholder') || 
-                        supabaseUrl.includes('missing-supabase-url') ||
-                        supabaseUrl === '111';
+  return {
+    url: localUrl || import.meta.env.VITE_SUPABASE_URL || 'https://qllpxployhzizlicxbss.supabase.co',
+    key: localKey || import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_Bcon0479bh1HqnkUuvztCQ_99QwQW_DqN1zK3I6o6N5O8'
+  };
+};
 
-if (isConfigMissing) {
-  console.warn('⚠️ Supabase config is missing or invalid. Requests are blocked.');
-}
+const { url, key } = getSupabaseConfig();
 
-// Ensure the URL is valid or fallback to a known non-crashing URL
-const finalUrl = (supabaseUrl && supabaseUrl.startsWith('http')) ? supabaseUrl : 'https://qllpxployhzizlicxbss.supabase.co';
-
-export const supabase = createClient(finalUrl, supabaseAnonKey || 'missing-key', {
+export const supabase = createClient(url, key, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-  },
-  global: {
-    fetch: (...args) => {
-      if (isConfigMissing) {
-        console.error('🚫 Blocked Supabase request due to missing configuration.');
-        return Promise.reject(new Error('Supabase configuration missing'));
-      }
-      return fetch(...args);
-    }
   }
 });

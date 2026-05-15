@@ -5,7 +5,7 @@ import { ProductCard } from '../components/ProductCard';
 import { FilterSidebar } from '../components/FilterSidebar';
 import { useShop } from '../context/ShopContext';
 import { Product } from '../lib/utils';
-import { SlidersHorizontal, ArrowRight, Car, Droplets, Package } from 'lucide-react';
+import { SlidersHorizontal, ArrowRight, Car, Droplets, Package, AlertTriangle, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 
@@ -21,32 +21,47 @@ export const HomePage: React.FC = () => {
   const [page, setPage] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   const fetchProducts = async (pageNumber: number, isInitial = false) => {
-    if (isInitial) setLoading(true);
-    else setLoadingMore(true);
+    if (isInitial) {
+      setLoading(true);
+      setFetchError(null);
+    } else {
+      setLoadingMore(true);
+    }
 
     try {
+      // Direct raw fetch for total count first to verify connection
+      const { count: dbCount, error: countError } = await supabase
+        .from('products')
+        .select('*', { count: 'exact', head: true });
+      
+      if (countError) {
+        console.error('Count check failed:', countError);
+        setFetchError(`Помилка підключення: ${countError.message}`);
+        setLoading(false);
+        setLoadingMore(false);
+        return;
+      }
+
+      if (dbCount !== null) setTotalCount(dbCount);
+
       let query = supabase
         .from('products')
-        .select('*', { count: 'exact' });
+        .select('*');
 
-      // Try to filter by type, but handle case where column is missing
+      // Only apply basic range for pagination to ensure we always get SOMETHING
+      query = query
+        .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
+
+      // Other filters are optional and shouldn't block the initial load
       if (mode) {
         query = query.eq('type', mode);
       }
 
-      query = query
-        .gte('price', priceRange[0])
-        .lte('price', priceRange[1])
-        .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
-
       if (selectedCategory) {
         query = query.eq('category', selectedCategory);
-      }
-
-      if (selectedBrands.length > 0) {
-        query = query.in('brand', selectedBrands);
       }
 
       if (searchQuery) {
@@ -56,38 +71,44 @@ export const HomePage: React.FC = () => {
       const { data, error, count } = await query;
 
       if (error) {
-        // If the error is about a missing column, try fetching without the type filter
-        if (error.message?.includes('column') && error.message?.includes('type')) {
-          console.warn('Type column missing, falling back to non-filtered query');
-          const fallbackQuery = supabase
-            .from('products')
-            .select('*', { count: 'exact' })
-            .gte('price', priceRange[0])
-            .lte('price', priceRange[1])
-            .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
-          
-          const { data: fallbackData, error: fallbackError, count: fallbackCount } = await fallbackQuery;
-          if (fallbackError) throw fallbackError;
-          
-          if (fallbackData) {
-            const mappedData = fallbackData.map(item => ({
-              ...item,
-              image: item.image_url || item.image || '',
-              type: item.type || 'auto'
-            })) as Product[];
+        console.error('Supabase fetch error:', error);
+      }
 
-            if (isInitial) setProducts(mappedData);
-            else setProducts(prev => [...prev, ...mappedData]);
-
-            setHasMore(fallbackData.length === ITEMS_PER_PAGE);
-            if (fallbackCount !== null) setTotalCount(fallbackCount);
-          }
+      if (error || (isInitial && (!data || data.length === 0))) {
+        console.log('No products found with filters, attempting raw fetch fallback...');
+        
+        // If anything fails or NO results found with filters, fetch EVERYTHING raw
+        const { data: rawData, error: rawError, count: rawCount } = await supabase
+          .from('products')
+          .select('*', { count: 'exact' })
+          .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
+        
+        if (rawError) {
+          console.error('Raw fetch fallback failed:', rawError);
+          throw rawError;
+        }
+        
+        if (rawData && rawData.length > 0) {
+          console.log(`Found ${rawData.length} products via raw fallback.`);
+          const mapped = rawData.map(item => ({ ...item, image: item.image_url || item.image || '', type: item.type || 'auto' }));
+          if (isInitial) setProducts(mapped as Product[]);
+          else setProducts(prev => [...prev, ...mapped as Product[]]);
+          setHasMore(rawData.length === ITEMS_PER_PAGE);
+          if (rawCount !== null) setTotalCount(rawCount);
           return;
         }
-        throw error;
+        
+        console.warn('Database seems to be completely empty.');
+        // If even raw fetch is empty, ensure state is updated
+        if (isInitial) {
+          setProducts([]);
+          setTotalCount(0);
+        }
+        return;
       }
 
       if (data) {
+        console.log(`Successfully fetched ${data.length} products.`);
         const mappedData = data.map(item => ({
           ...item,
           image: item.image_url || item.image || '',
@@ -114,7 +135,7 @@ export const HomePage: React.FC = () => {
   useEffect(() => {
     setPage(0);
     fetchProducts(0, true);
-  }, [mode, searchQuery, selectedCategory, priceRange, selectedBrands]);
+  }, [mode, searchQuery, selectedCategory, priceRange[0], priceRange[1], JSON.stringify(selectedBrands)]);
 
   const loadMore = () => {
     const nextPage = page + 1;
@@ -198,7 +219,26 @@ export const HomePage: React.FC = () => {
           />
 
           <div className="w-full">
-            {loading ? (
+            {fetchError ? (
+              <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 p-12 rounded-[40px] text-center max-w-2xl mx-auto">
+                <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+                <h3 className="text-2xl font-black text-red-900 dark:text-red-400 mb-2">Помилка з'єднання</h3>
+                <p className="text-red-700/60 dark:text-red-400/60 font-medium mb-6 font-mono text-xs">{fetchError}</p>
+                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                  <button 
+                    onClick={() => fetchProducts(0, true)}
+                    className="bg-red-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200"
+                  >
+                    Спробувати ще раз
+                  </button>
+                  {isAdmin && (
+                    <Link to="/admin?tab=diagnostics" className="text-red-600 font-bold hover:underline">
+                      Діагностика →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            ) : loading ? (
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8">
                 {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
                   <div key={i} className="animate-pulse bg-gray-100 dark:bg-gray-800 aspect-[4/5] rounded-2xl" />
@@ -237,21 +277,27 @@ export const HomePage: React.FC = () => {
                   <Package size={48} className="mx-auto opacity-20" />
                 </div>
                 <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Нічого не знайдено</h3>
-                <p className="text-gray-500 dark:text-gray-400 mb-6">Спробуйте змінити параметри пошуку або фільтри</p>
-                {isAdmin && (
-                  <div className="flex flex-col items-center gap-4">
-                    <p className="text-blue-600 dark:text-blue-400 font-bold bg-blue-50 dark:bg-blue-900/20 px-4 py-2 rounded-lg">
-                      Ви адмін: можливо, потрібно знову запустити синхронізацію після оновлення формату даних.
-                    </p>
+                <p className="text-gray-500 dark:text-gray-400 mb-8 max-w-sm mx-auto font-medium">
+                  Всього в базі <b>{totalCount}</b> пропозицій. Жодна не відповідає вашим фільтрам. 
+                  {totalCount === 0 && " Схоже, база порожня або доступ заблоковано RLS."}
+                </p>
+                <div className="flex flex-col items-center gap-4">
+                  <button 
+                    onClick={() => window.location.href = '/'}
+                    className="px-8 py-3 bg-gray-900 text-white font-bold rounded-xl hover:bg-blue-600 transition-all shadow-lg shadow-gray-200"
+                  >
+                    Скинути всі фільтри
+                  </button>
+                  {isAdmin && (
                     <Link 
-                      to="/admin" 
-                      className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-bold rounded-xl hover:bg-blue-700 transition-all active:scale-95"
+                      to="/admin?tab=diagnostics" 
+                      className="inline-flex items-center gap-2 px-6 py-3 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-bold border border-gray-200 dark:border-gray-700 rounded-xl hover:bg-gray-50 transition-all shadow-sm"
                     >
-                      Перейти в Адмін-панель
-                      <ArrowRight size={18} />
+                      <Settings size={18} />
+                      Діагностика підключення
                     </Link>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
             )}
           </div>

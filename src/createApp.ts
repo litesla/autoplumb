@@ -6,25 +6,11 @@ import * as xlsx from "xlsx";
 export async function createExpressApp() {
   const app = express();
 
-  // Supabase client initialization
-  const supabaseUrl = process.env.VITE_SUPABASE_URL || "";
-  const supabaseKey = process.env.VITE_SUPABASE_ANON_KEY || "";
+  // Supabase client initialization (Hardcoded for Netlify compatibility)
+  const supabaseUrl = "https://qllpxployhzizlicxbss.supabase.co";
+  const supabaseKey = "sb_publishable_Bcon0479bh1HqnkUuvztCQ_99QwQW_DqN1zK3I6o6N5O8";
   
-  const isConfigMissing = !supabaseUrl || !supabaseKey || supabaseUrl.includes('placeholder') || supabaseUrl === '111';
-
-  // Safe URL to prevent crash
-  const safeUrl = (supabaseUrl && supabaseUrl.startsWith('http')) ? supabaseUrl : 'https://qllpxployhzizlicxbss.supabase.co';
-  const supabase = createClient(safeUrl, supabaseKey || "placeholder", {
-    global: {
-      fetch: (...args) => {
-        if (isConfigMissing) {
-          console.error('🚫 Server-side: Blocked Supabase request due to missing configuration.');
-          return Promise.reject(new Error('Supabase configuration missing'));
-        }
-        return fetch(...args);
-      }
-    }
-  });
+  const supabase = createClient(supabaseUrl, supabaseKey);
 
   app.use(express.json());
 
