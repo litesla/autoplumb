@@ -2431,46 +2431,62 @@ export const AdminPage: React.FC = () => {
               <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
                 <h3 className="text-xl font-black mb-6 flex items-center gap-3">
                   <Settings className="text-blue-600" />
-                  Ваші налаштування Supabase
+                  Налаштування власної бази Supabase
                 </h3>
                 <div className="space-y-6">
+                  <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-4">
+                    <p className="text-[11px] text-blue-800 leading-relaxed">
+                      <b>Де взяти ключі?</b><br />
+                      1. Зайдіть у <b>Supabase Dashboard</b><br />
+                      2. Оберіть ваш проект<br />
+                      3. Перейдіть у <b>Project Settings</b> (внизу зліва) <br />
+                      4. Натисніть <b>API</b>. Скопіюйте <b>Project URL</b> та <b>anon public</b> ключ.
+                    </p>
+                  </div>
+
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Supabase Project URL</label>
+                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Project URL (Адреса проекту)</label>
                     <input 
                       type="text" 
                       value={customDbUrl}
                       onChange={(e) => setCustomDbUrl(e.target.value)}
-                      placeholder="https://your-project.supabase.co"
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-sm focus:ring-2 focus:ring-blue-500"
+                      placeholder="Наприклад: https://abcxyz.supabase.co"
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-sm focus:ring-2 focus:ring-blue-500 shadow-inner"
                     />
                   </div>
                   <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Anon Public Key</label>
+                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Anon Public Key (Публічний ключ)</label>
                     <textarea 
                       value={customDbKey}
                       onChange={(e) => setCustomDbKey(e.target.value)}
-                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                      placeholder="Вставте довгий ключ, що починається на eyJ..."
                       rows={3}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-sm focus:ring-2 focus:ring-blue-500 resize-none"
+                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-[11px] focus:ring-2 focus:ring-blue-500 resize-none shadow-inner"
                     />
                   </div>
                   <div className="flex gap-4">
                     <button 
-                      onClick={saveCustomConfig}
+                      onClick={() => {
+                        if (customDbUrl.includes('your-project')) {
+                          alert('Помилка: Ви залишили шаблон "your-project". Вставте реальну адресу вашого проекту.');
+                          return;
+                        }
+                        saveCustomConfig();
+                      }}
                       className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
                     >
-                      ПІДКЛЮЧИТИ МОЮ БАЗУ
+                      ЗБЕРЕГТИ ТА ПІДКЛЮЧИТИ
                     </button>
                     <button 
                       onClick={resetConfig}
                       className="px-6 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold hover:bg-gray-200 transition-all"
-                      title="Скинути до стандартних"
+                      title="Скинути до стандартних (демо)"
                     >
                       <RotateCw size={20} />
                     </button>
                   </div>
-                  <p className="text-[10px] text-gray-400 text-center italic">
-                    Дані зберігаються тільки у вашому браузері (localStorage).
+                  <p className="text-[10px] text-red-500 text-center font-bold">
+                    ВАЖЛИВО: Після натискання кнопки сторінка перевантажиться.
                   </p>
                 </div>
               </div>
@@ -2478,13 +2494,18 @@ export const AdminPage: React.FC = () => {
               <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
                 <h3 className="text-xl font-black mb-6 flex items-center gap-3">
                   <ShieldAlert className="text-blue-600" />
-                  Статус
+                  Статус підключення
                 </h3>
                 <div className="space-y-4">
                   <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
-                    <div className="text-[10px] text-gray-400 uppercase font-black mb-1">Поточний URL:</div>
+                    <div className="text-[10px] text-gray-400 uppercase font-black mb-1">Цільовий проект:</div>
                     <div className="font-mono text-[10px] break-all text-blue-600 font-bold leading-tight">
-                      {localStorage.getItem('supabase_url') || 'Системний проект (qllpx...)'}
+                      {localStorage.getItem('supabase_url') ? (
+                        <span className="flex items-center gap-1">
+                          <CheckSquare size={10} className="text-green-500" />
+                          Власна база: {localStorage.getItem('supabase_url')?.split('//')[1]?.split('.')[0]}
+                        </span>
+                      ) : 'Демо-проект (qllpx...)'}
                     </div>
                   </div>
                   <div className="p-4 bg-gray-50 dark:bg-gray-900/50 rounded-2xl">
