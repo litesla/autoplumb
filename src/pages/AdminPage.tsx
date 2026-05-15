@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck } from 'lucide-react';
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
 import * as XLSX from 'xlsx';
@@ -2431,63 +2431,67 @@ export const AdminPage: React.FC = () => {
               <div className="lg:col-span-2 bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm">
                 <h3 className="text-xl font-black mb-6 flex items-center gap-3">
                   <Settings className="text-blue-600" />
-                  Налаштування власної бази Supabase
+                  Налаштування сайту
                 </h3>
                 <div className="space-y-6">
-                  <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl mb-4">
-                    <p className="text-[11px] text-blue-800 leading-relaxed">
-                      <b>Де взяти ключі?</b><br />
-                      1. Зайдіть у <b>Supabase Dashboard</b><br />
-                      2. Оберіть ваш проект<br />
-                      3. Перейдіть у <b>Project Settings</b> (внизу зліва) <br />
-                      4. Натисніть <b>API</b>. Скопіюйте <b>Project URL</b> та <b>anon public</b> ключ.
-                    </p>
+                  <div className="bg-green-50 border border-green-100 p-6 rounded-[24px]">
+                    <div className="flex items-start gap-4">
+                      <div className="bg-green-100 p-3 rounded-xl">
+                        <ShieldCheck className="text-green-600" size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-black text-green-900 mb-1 uppercase text-sm">База підключена до коду</h4>
+                        <p className="text-xs text-green-700/80 leading-relaxed font-medium">
+                          Ваші ключі Supabase тепер "вшиті" безпосередньо в код додатка. 
+                          Це означає, що <b>всі відвідувачі</b> сайту за замовчуванням бачать вашу базу даних 
+                          <code> qllpx...</code> без необхідності налаштовувати щось вручну.
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Project URL (Адреса проекту)</label>
-                    <input 
-                      type="text" 
-                      value={customDbUrl}
-                      onChange={(e) => setCustomDbUrl(e.target.value)}
-                      placeholder="Наприклад: https://abcxyz.supabase.co"
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-sm focus:ring-2 focus:ring-blue-500 shadow-inner"
-                    />
+                  <div className="p-6 bg-gray-50 dark:bg-gray-900 rounded-[24px] border border-gray-100 dark:border-gray-800">
+                    <p className="text-[10px] font-black uppercase text-gray-400 mb-4 ml-1">Активна конфігурація:</p>
+                    <div className="space-y-3">
+                      <div>
+                        <div className="text-[9px] text-gray-400 mb-1">PROJECT URL</div>
+                        <div className="font-mono text-[11px] font-bold text-gray-700 break-all">https://qllpxployhzizlicxbss.supabase.co</div>
+                      </div>
+                      <div>
+                        <div className="text-[9px] text-gray-400 mb-1">ANON KEY (PUBLIC)</div>
+                        <div className="font-mono text-[11px] font-bold text-gray-700 break-all opacity-50">eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...DvlD5...</div>
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-[10px] font-black uppercase text-gray-400 ml-1">Anon Public Key (Публічний ключ)</label>
-                    <textarea 
-                      value={customDbKey}
-                      onChange={(e) => setCustomDbKey(e.target.value)}
-                      placeholder="Вставте довгий ключ, що починається на eyJ..."
-                      rows={3}
-                      className="w-full px-5 py-4 bg-gray-50 dark:bg-gray-900 border-none rounded-2xl font-mono text-[11px] focus:ring-2 focus:ring-blue-500 resize-none shadow-inner"
-                    />
-                  </div>
-                  <div className="flex gap-4">
-                    <button 
-                      onClick={() => {
-                        if (customDbUrl.includes('your-project')) {
-                          alert('Помилка: Ви залишили шаблон "your-project". Вставте реальну адресу вашого проекту.');
-                          return;
-                        }
-                        saveCustomConfig();
-                      }}
-                      className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all active:scale-95"
-                    >
-                      ЗБЕРЕГТИ ТА ПІДКЛЮЧИТИ
-                    </button>
-                    <button 
-                      onClick={resetConfig}
-                      className="px-6 py-4 bg-gray-100 text-gray-500 rounded-2xl font-bold hover:bg-gray-200 transition-all"
-                      title="Скинути до стандартних (демо)"
-                    >
-                      <RotateCw size={20} />
-                    </button>
-                  </div>
-                  <p className="text-[10px] text-red-500 text-center font-bold">
-                    ВАЖЛИВО: Після натискання кнопки сторінка перевантажиться.
+                </div>
+              </div>
+
+              <div className="bg-white dark:bg-gray-800 p-8 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm flex flex-col">
+                <h3 className="text-xl font-black mb-6 flex items-center gap-3">
+                  <ShieldCheck className="text-green-600" />
+                  Виправлення видимості (RLS)
+                </h3>
+                <div className="flex-1 space-y-4">
+                  <p className="text-[11px] text-gray-500 leading-relaxed font-medium">
+                    Якщо товари бачите тільки ви, а інші бачать "0" або помилку — потрібно відключити захист (RLS) у Supabase.
                   </p>
+                  <div className="p-4 bg-gray-900 rounded-2xl">
+                    <pre className="text-[10px] text-green-400 font-mono leading-tight whitespace-pre-wrap">
+                      {`ALTER TABLE products DISABLE ROW LEVEL SECURITY;\n` +
+                       `ALTER TABLE blog DISABLE ROW LEVEL SECURITY;\n` +
+                       `ALTER TABLE content DISABLE ROW LEVEL SECURITY;\n` +
+                       `ALTER TABLE shop_settings DISABLE ROW LEVEL SECURITY;`}
+                    </pre>
+                  </div>
+                  <button 
+                    onClick={() => {
+                      navigator.clipboard.writeText(`ALTER TABLE products DISABLE ROW LEVEL SECURITY;\nALTER TABLE blog DISABLE ROW LEVEL SECURITY;\nALTER TABLE content DISABLE ROW LEVEL SECURITY;\nALTER TABLE shop_settings DISABLE ROW LEVEL SECURITY;`);
+                      alert('SQL скопійовано! Вставте його в SQL Editor у вашому Supabase Dashboard.');
+                    }}
+                    className="w-full py-3 bg-gray-100 dark:bg-gray-900 text-gray-900 dark:text-white rounded-xl font-bold text-xs hover:bg-gray-200 transition-all flex items-center justify-center gap-2"
+                  >
+                    СКОПІЮВАТИ SQL-КОМАНДУ
+                  </button>
                 </div>
               </div>
 
