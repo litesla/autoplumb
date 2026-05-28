@@ -170,5 +170,13 @@ service cloud.firestore {
     match /test/connection {
       allow read: if true;
     }
+
+    match /chats/{chatId} {
+      allow read, write: if true;
+      
+      match /messages/{messageId} {
+        allow read, write: if true;
+      }
+    }
   }
 }

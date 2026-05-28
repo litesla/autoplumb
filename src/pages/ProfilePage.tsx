@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useShop } from '../context/ShopContext';
 import { supabase } from '../lib/supabaseClient';
 import { motion, AnimatePresence } from 'motion/react';
-import { User, ShoppingBag, Heart, MapPin, LogOut, ChevronRight, Package, Clock, CheckCircle, Truck, XCircle, Award, Sparkles, Phone, Mail, Save, Plus, Trash2 } from 'lucide-react';
+import { User, ShoppingBag, Heart, MapPin, LogOut, ChevronRight, Package, Clock, CheckCircle, Truck, XCircle, Award, Sparkles, Phone, Mail, Save, Plus, Trash2, Settings } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { Order, Product } from '../lib/utils';
 import { useAuth } from '../context/AuthContext';
@@ -17,8 +17,14 @@ interface UserProfile {
   savedAddresses: string[];
 }
 
+const getFirstProductImage = (imgStr?: string) => {
+  if (!imgStr) return '';
+  const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
+  return parts[0]?.trim() || '';
+};
+
 export const ProfilePage: React.FC = () => {
-  const { user, loading: authLoading } = useAuth();
+  const { user, loading: authLoading, isAdmin } = useAuth();
   const { wishlist } = useWishlist();
   const navigate = useNavigate();
   
@@ -260,6 +266,18 @@ export const ProfilePage: React.FC = () => {
                   </div>
                   {activeTab === 'settings' && <ChevronRight size={16} />}
                 </button>
+                {isAdmin && (
+                  <button 
+                    onClick={() => navigate('/admin')}
+                    className="w-full flex items-center justify-between p-4 rounded-2xl font-black text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/20 transition-all border border-blue-100 dark:border-blue-900/35 bg-blue-50/20 dark:bg-blue-950/10 mt-2"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <Settings size={18} />
+                      <span className="text-sm">Адмін-панель ✨</span>
+                    </div>
+                    <ChevronRight size={16} />
+                  </button>
+                )}
               </nav>
             </div>
           </div>
@@ -328,7 +346,7 @@ export const ProfilePage: React.FC = () => {
                               <div key={idx} className="flex items-center space-x-4 p-4 bg-gray-50/50 dark:bg-gray-900/30 rounded-2xl border border-gray-100/50 dark:border-gray-700/50">
                                 <div className="w-16 h-16 bg-white dark:bg-gray-800 rounded-xl overflow-hidden shadow-sm flex-shrink-0">
                                   <img 
-                                    src={item.image || `https://picsum.photos/seed/${item.id}/100/100`} 
+                                    src={getFirstProductImage(item.image) || `https://picsum.photos/seed/${item.id}/100/100`} 
                                     className="w-full h-full object-cover" 
                                     onError={(e) => {
                                       (e.target as HTMLImageElement).src = 'https://via.placeholder.com/100?text=AutoPlumb';
@@ -392,7 +410,7 @@ export const ProfilePage: React.FC = () => {
                           className="bg-white dark:bg-gray-800 p-6 rounded-[32px] border border-gray-100 dark:border-gray-700 shadow-sm flex items-center space-x-6 hover:shadow-md transition-all group"
                         >
                           <div className="w-28 h-28 rounded-2xl overflow-hidden border border-gray-100 dark:border-gray-700 flex-shrink-0 shadow-sm transition-transform group-hover:scale-105">
-                            <img src={product.image || `https://picsum.photos/seed/${product.id}/200/200`} className="w-full h-full object-cover" />
+                            <img src={getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/200/200`} className="w-full h-full object-cover" />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div className="mb-2">

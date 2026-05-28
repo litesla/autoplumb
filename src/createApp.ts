@@ -236,7 +236,7 @@ export async function createExpressApp() {
         title: postData.title,
         excerpt: postData.excerpt,
         content: postData.content,
-        author: "AutoPlumb AI",
+        author: "Редакція AutoPlumb",
         category: postData.category,
         read_time: postData.read_time,
         image_url: "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&q=80&w=800",

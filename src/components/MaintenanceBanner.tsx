@@ -44,25 +44,26 @@ export const MaintenanceBanner: React.FC = () => {
     <AnimatePresence>
       {techBannerMode && (
         <motion.div
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: 'auto', opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          className="bg-gradient-to-r from-blue-600 to-indigo-700 overflow-hidden z-[100] border-b border-white/10"
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          transition={{ duration: 0.3, ease: 'easeOut' }}
+          className="bg-gradient-to-r from-blue-600 to-indigo-700 z-[100] border-b border-white/10 shadow-md"
         >
-          <div className="container mx-auto px-4 py-3">
-            <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-8 text-white">
-              <div className="flex items-center space-x-2">
-                <AlertCircle size={18} className="text-blue-200 animate-pulse" />
-                <span className="font-bold text-sm md:text-base">
+          <div className="container mx-auto px-4 py-2.5 sm:py-3">
+            <div className="flex flex-col md:flex-row items-center justify-center gap-2 md:gap-8 text-white text-center">
+              <div className="flex items-center justify-center space-x-2 flex-wrap min-w-0">
+                <AlertCircle size={16} className="text-blue-200 animate-pulse shrink-0" />
+                <span className="font-bold text-xs sm:text-sm md:text-base whitespace-nowrap">
                   Технічні роботи:
                 </span>
-                <span className="text-white/80 text-sm md:text-base font-medium">
+                <span className="text-white/90 text-[11px] sm:text-sm md:text-base font-semibold">
                   Редагуємо назви та додаємо нові фото товарів.
                 </span>
               </div>
-              <div className="flex items-center space-x-2 bg-white/10 px-4 py-1 rounded-full border border-white/10">
-                <Truck size={16} className="text-blue-200" />
-                <span className="font-black text-xs md:text-sm uppercase tracking-wider">
+              <div className="flex items-center justify-center space-x-1.5 bg-white/10 px-3 py-1 rounded-full border border-white/10 shrink-0">
+                <Truck size={14} className="text-blue-200 animate-bounce shrink-0" />
+                <span className="font-black text-[9px] sm:text-xs md:text-sm uppercase tracking-wider">
                   Всі товари в наявності та готові до відправки!
                 </span>
               </div>

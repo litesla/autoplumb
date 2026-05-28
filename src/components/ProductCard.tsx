@@ -1,9 +1,9 @@
 import React from 'react';
 import { ShoppingCart } from 'lucide-react';
-import { Product } from '../lib/utils';
+import { Product, triggerFlyToCart } from '../lib/utils';
 import { useCart } from '../context/CartContext';
-
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'motion/react';
 
 interface ProductCardProps {
   product: Product;
@@ -14,6 +14,12 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
   const { addItem } = useCart();
   const navigate = useNavigate();
 
+  const getFirstProductImage = (imgStr?: string) => {
+    if (!imgStr) return '';
+    const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
+    return parts[0]?.trim() || '';
+  };
+
   const handleCardClick = (e: React.MouseEvent) => {
     // Navigate to product page unless a button or its child was clicked
     if (!(e.target as HTMLElement).closest('button')) {
@@ -21,16 +27,30 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
     }
   };
 
+  const handleAddToCart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const cleanImg = getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/400/400`;
+    triggerFlyToCart(cleanImg, e);
+    addItem(product);
+  };
+
   return (
-    <div 
+    <motion.div 
       onClick={handleCardClick}
-      className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden hover:shadow-xl hover:shadow-gray-200/50 dark:hover:shadow-none transition-all duration-300 h-full flex flex-col cursor-pointer"
+      whileHover={{ 
+        scale: 1.025,
+        y: -6,
+        boxShadow: "0 25px 50px -12px rgba(59, 130, 246, 0.15)"
+      }}
+      transition={{ type: "spring", stiffness: 400, damping: 25 }}
+      className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden transition-all duration-300 h-full flex flex-col cursor-pointer"
     >
       <div className="aspect-square bg-gray-50 dark:bg-gray-800 relative overflow-hidden shrink-0">
         <img
-          src={product.image || `https://picsum.photos/seed/${product.id}/400/400`}
+          src={getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/400/400`}
           alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
           referrerPolicy="no-referrer"
         />
         <div className="absolute top-4 left-4">
@@ -55,12 +75,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
           </div>
           
           <button 
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              addItem(product);
-            }}
-            className="p-3 md:p-2.5 bg-blue-600 text-white md:bg-gray-50 md:dark:bg-gray-800 md:text-gray-900 md:dark:text-white rounded-xl active:scale-95 transition-all shadow-lg shadow-blue-600/20 md:shadow-none"
+            onClick={handleAddToCart}
+            className="p-3 md:p-2.5 bg-blue-600 text-white md:bg-gray-50 md:dark:bg-gray-800 md:text-gray-900 md:dark:text-white rounded-xl active:scale-90 transition-all shadow-lg shadow-blue-600/20 md:shadow-none hover:bg-blue-700 md:hover:bg-blue-100 md:dark:hover:bg-blue-900/50 cursor-pointer"
           >
             <ShoppingCart size={20} className="md:hidden" />
             <ShoppingCart size={18} className="hidden md:block" />
@@ -70,12 +86,8 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
         {showButtons && (
           <div className="hidden md:grid grid-cols-2 gap-3 mt-4">
             <button 
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                addItem(product);
-              }}
-              className="flex items-center justify-center space-x-2 bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-colors"
+              onClick={handleAddToCart}
+              className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition-colors cursor-pointer active:scale-95"
             >
               <ShoppingCart size={18} />
               <span>В кошик</span>
@@ -87,13 +99,13 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
                 addItem(product);
                 navigate('/checkout');
               }}
-              className="bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white py-3 rounded-xl font-bold hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+              className="bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white py-3 rounded-xl font-bold hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer active:scale-95"
             >
               Замовити
             </button>
           </div>
         )}
       </div>
-    </div>
+    </motion.div>
   );
 };

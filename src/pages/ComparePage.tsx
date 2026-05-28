@@ -6,6 +6,12 @@ import { ArrowLeft, X, ShoppingBag, Scale, Trash2 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
 
+const getFirstProductImage = (imgStr?: string) => {
+  if (!imgStr) return '';
+  const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
+  return parts[0]?.trim() || '';
+};
+
 export const ComparePage: React.FC = () => {
   const { compareList, removeFromCompare, clearCompare } = useCompare();
   const { addItem } = useCart();
@@ -80,7 +86,7 @@ export const ComparePage: React.FC = () => {
                           <Link to={`/product/${product.id}`} className="block group/item">
                             <div className="aspect-square bg-gray-50 rounded-2xl mb-4 overflow-hidden">
                               <img 
-                                src={product.image || `https://picsum.photos/seed/${product.id}/400/400`} 
+                                src={getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/400/400`} 
                                 alt={product.name}
                                 className="w-full h-full object-cover group-hover/item:scale-110 transition-transform duration-500"
                                 referrerPolicy="no-referrer"

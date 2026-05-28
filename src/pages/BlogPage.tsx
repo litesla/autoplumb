@@ -3,6 +3,7 @@ import { supabase } from '../lib/supabaseClient';
 import { motion } from 'motion/react';
 import { BookOpen, Calendar, User, ArrowRight, Search, Tag } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
+import { fallbackBlogPosts } from '../data/fallbackPosts';
 
 export interface BlogPost {
   id: string;
@@ -30,13 +31,16 @@ export const BlogPage: React.FC = () => {
         .select('*')
         .order('created_at', { ascending: false });
       
-      if (data) {
+      if (data && data.length > 0) {
         setPosts(data.map(post => ({
           ...post,
           image: (post as any).image_url || (post as any).image || '',
           readTime: (post as any).read_time || (post as any).readTime || '',
           createdAt: (post as any).created_at || (post as any).createdAt || new Date().toISOString()
         })) as BlogPost[]);
+      } else {
+        console.log('Database blog table is empty, falling back to client-side backup articles.');
+        setPosts(fallbackBlogPosts as BlogPost[]);
       }
       setLoading(false);
     };

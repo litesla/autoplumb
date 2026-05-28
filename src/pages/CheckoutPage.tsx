@@ -34,13 +34,31 @@ export const CheckoutPage: React.FC = () => {
         user_id: auth.currentUser?.uid || null
       }).select().single();
 
-      if (error) throw error;
+      if (error) {
+        console.error('Supabase order insert error:', error);
+        throw new Error(`${error.message} (Code: ${error.code})`);
+      }
 
       clearCart();
-      navigate(`/order-tracking/${data.id}`);
-    } catch (err) {
+      if (data) {
+        navigate(`/order-tracking/${data.id}`);
+      } else {
+        throw new Error('Замовлення створено, але не отримано відповідь від сервера');
+      }
+    } catch (err: any) {
       console.error('Error creating order:', err);
-      alert('Помилка при створенні замовлення');
+      let errorMsg = err.message || 'Невідома помилка';
+      
+      // Provide actionable feedback on common Supabase setup errors
+      if (errorMsg.includes('PGRST204') || errorMsg.includes('column') || errorMsg.includes('schema cache')) {
+        errorMsg = `${errorMsg}\n\n💡 ПОРАДА: У вашій базі даних Supabase в таблиці "orders" відсутні потрібні колонки (наприклад, delivery_address). Перейдіть в Адмін-панель -> Налаштування -> "Базовий SQL для структури", скопіюйте новий скрипт для "Orders" і виконайте його в Supabase SQL Editor!`;
+      } else if (errorMsg.includes('relation') && errorMsg.includes('does not exist')) {
+        errorMsg = `${errorMsg}\n\n💡 ПОРАДА: Таблиця "orders" не була створена в базі даних Supabase. Перейдіть в Адмін-панель -> Налаштування -> "Базовий SQL для структури", скопіюйте SQL створення таблиці замовлень і виконайте його в Supabase SQL Editor!`;
+      } else if (errorMsg.includes('violates not-null constraint') && errorMsg.includes('customer_name')) {
+        errorMsg = `${errorMsg}\n\n💡 ПОРАДА: У вашій таблиці "orders" є старе обов'язкове поле "customer_name", яке заважає створенню нових замовлень. Будь ласка, перейдіть в Адмін-панель -> Налаштування та скопіюйте скрипт оновлення замовлень (він видалить стару та запустить правильну структуру!).`;
+      }
+      
+      alert(`Помилка при створенні замовлення: ${errorMsg}`);
     } finally {
       setLoading(false);
     }

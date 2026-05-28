@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, ShoppingCart, User, Menu, ChevronDown, Phone, MessageSquare, Tag, Percent, Sparkles, LogOut, Settings, X, ArrowRight, Heart, Moon, Sun, SlidersHorizontal } from 'lucide-react';
 import { useShop } from '../context/ShopContext';
 import { useCart } from '../context/CartContext';
@@ -8,8 +9,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import { auth } from '../lib/firebase';
 import { signOut } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
-import { Product } from '../lib/utils';
+import { Product, getExpandedSearchTerms, getSearchKeywords } from '../lib/utils';
 import { supabase } from '../lib/supabaseClient';
+
+const getFirstProductImage = (imgStr?: string) => {
+  if (!imgStr) return '';
+  const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
+  return parts[0]?.trim() || '';
+};
 
 export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () => void }, { onCartOpen: () => void; onFilterOpen?: () => void }>(({ onCartOpen, onFilterOpen }, ref) => {
   const { mode, setMode, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory } = useShop();
@@ -31,6 +38,20 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
   const searchInputRef = useRef<HTMLInputElement>(null);
   const mobileSearchInputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
+
+  const [phoneCopied, setPhoneCopied] = useState<string | null>(null);
+
+  const handlePhoneClick = (e: React.MouseEvent<HTMLAnchorElement>, rawNum: string, operator: string) => {
+    // Copy clean formatting format to clipboard automatically
+    const formattedNum = "+380 68 918 0637";
+    navigator.clipboard.writeText(formattedNum).then(() => {
+      setPhoneCopied(operator);
+      setTimeout(() => setPhoneCopied(null), 2000);
+    }).catch(err => {
+      console.error("Could not copy number: ", err);
+    });
+    // On mobile screens, the normal execution of the href (tel:link) will occur
+  };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -91,12 +112,33 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
   useEffect(() => {
     const fetchSuggestions = async () => {
       if (searchQuery.length > 1) {
-        const { data, error } = await supabase
+        let query = supabase
           .from('products')
           .select('*')
-          .eq('type', mode)
-          .or(`name.ilike.%${searchQuery}%,brand.ilike.%${searchQuery}%,article.ilike.%${searchQuery}%`)
-          .limit(8);
+          .eq('type', mode);
+
+        const words = getSearchKeywords(searchQuery);
+        if (words.length > 0) {
+          words.forEach(word => {
+            const expanded = getExpandedSearchTerms(word);
+            if (expanded.length > 0) {
+              const orConditions = expanded.map(term => 
+                `name.ilike.%${term}%,brand.ilike.%${term}%,description.ilike.%${term}%,article.ilike.%${term}%`
+              ).join(',');
+              query = query.or(orConditions);
+            }
+          });
+        } else {
+          const expanded = getExpandedSearchTerms(searchQuery);
+          if (expanded.length > 0) {
+            const orConditions = expanded.map(term => 
+              `name.ilike.%${term}%,brand.ilike.%${term}%,description.ilike.%${term}%,article.ilike.%${term}%`
+            ).join(',');
+            query = query.or(orConditions);
+          }
+        }
+
+        const { data, error } = await query.limit(8);
 
         if (error) {
           console.error('Error fetching search suggestions:', error);
@@ -104,7 +146,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
         }
 
         if (data) {
-          const mapped = data.map(item => ({ ...item, image: item.image_url })) as Product[];
+          const mapped = data.map(item => ({ ...item, image: item.image_url || item.image })) as Product[];
           setSearchSuggestions(mapped);
           setShowSuggestions(true);
           setActiveSuggestionIndex(-1);
@@ -152,11 +194,12 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
   };
 
   return (
-    <header ref={headerRef} className="z-[100] w-full bg-white/70 dark:bg-black/70 backdrop-blur-2xl border-b border-gray-100/50 dark:border-gray-800/50 transition-all duration-500">
-      <div className="container mx-auto px-4 h-16 md:h-20 flex items-center justify-between gap-4">
-        <Link to="/" onClick={() => { setSelectedCategory(null); setSearchQuery(''); }} className="flex flex-col group">
-          <span className="text-xl md:text-2xl font-black text-gray-900 dark:text-white tracking-tighter leading-none">AutoPlumb</span>
-          <span className="text-[8px] md:text-[10px] font-black uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400 leading-none mt-1">Premium Store</span>
+    <>
+      <header ref={headerRef} className="z-[100] w-full bg-white/70 dark:bg-black/70 backdrop-blur-2xl border-b border-gray-100/50 dark:border-gray-800/50 transition-all duration-500">
+      <div className="container mx-auto px-4 h-16 md:h-20 flex items-center justify-between gap-2 sm:gap-4">
+        <Link to="/" onClick={() => { setSelectedCategory(null); setSearchQuery(''); }} className="flex flex-col group shrink-0">
+          <span className="text-lg sm:text-xl md:text-2xl font-black text-gray-900 dark:text-white tracking-tighter leading-none">AutoPlumb</span>
+          <span className="text-[7px] sm:text-[8px] md:text-[10px] font-black uppercase tracking-[0.15em] text-blue-600 dark:text-blue-400 leading-none mt-1">Premium Store</span>
         </Link>
 
         <nav className="hidden md:flex items-center space-x-1">
@@ -183,36 +226,63 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                   className="absolute top-full left-0 mt-3 w-72 bg-white dark:bg-gray-900 rounded-[32px] shadow-2xl shadow-gray-200/50 dark:shadow-none border border-gray-100 dark:border-gray-800 p-5 space-y-4 z-50"
                 >
                   <div className="space-y-4">
-                    <a href="tel:+380671234567" className="flex items-center space-x-4 group cursor-pointer p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all">
+                    <a 
+                      href="tel:+380689180637" 
+                      onClick={(e) => handlePhoneClick(e, '+380689180637', 'Київстар')}
+                      className="flex items-center space-x-4 group cursor-pointer p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all relative"
+                    >
                       <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl text-blue-600 group-hover:scale-110 transition-transform">
                         <Phone size={20} />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <div className="text-sm font-black text-gray-900 dark:text-white">Київстар</div>
-                        <div className="text-xs text-gray-500 font-medium">+380 67 123 4567</div>
+                        <div className="text-xs text-gray-500 font-medium">+380 68 918 0637</div>
                       </div>
+                      {phoneCopied === 'Київстар' && (
+                        <span className="absolute right-2 px-2.5 py-1 bg-green-500 text-white rounded-full text-[10px] font-black animate-pulse">
+                          Скопійовано!
+                        </span>
+                      )}
                     </a>
-                    <a href="tel:+380501234567" className="flex items-center space-x-4 group cursor-pointer p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all">
+                    <a 
+                      href="tel:+380689180637" 
+                      onClick={(e) => handlePhoneClick(e, '+380689180637', 'Vodafone')}
+                      className="flex items-center space-x-4 group cursor-pointer p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all relative"
+                    >
                       <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl text-blue-600 group-hover:scale-110 transition-transform">
                         <Phone size={20} />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <div className="text-sm font-black text-gray-900 dark:text-white">Vodafone</div>
-                        <div className="text-xs text-gray-500 font-medium">+380 50 123 4567</div>
+                        <div className="text-xs text-gray-500 font-medium">+380 68 918 0637</div>
                       </div>
+                      {phoneCopied === 'Vodafone' && (
+                        <span className="absolute right-2 px-2.5 py-1 bg-green-500 text-white rounded-full text-[10px] font-black animate-pulse">
+                          Скопійовано!
+                        </span>
+                      )}
                     </a>
-                    <a href="tel:+380631234567" className="flex items-center space-x-4 group cursor-pointer p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all">
+                    <a 
+                      href="tel:+380689180637" 
+                      onClick={(e) => handlePhoneClick(e, '+380689180637', 'Lifecell')}
+                      className="flex items-center space-x-4 group cursor-pointer p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-2xl transition-all relative"
+                    >
                       <div className="p-3 bg-blue-50 dark:bg-blue-900/30 rounded-xl text-blue-600 group-hover:scale-110 transition-transform">
                         <Phone size={20} />
                       </div>
-                      <div>
+                      <div className="flex-1">
                         <div className="text-sm font-black text-gray-900 dark:text-white">Lifecell</div>
-                        <div className="text-xs text-gray-500 font-medium">+380 63 123 4567</div>
+                        <div className="text-xs text-gray-500 font-medium">+380 68 918 0637</div>
                       </div>
+                      {phoneCopied === 'Lifecell' && (
+                        <span className="absolute right-2 px-2.5 py-1 bg-green-500 text-white rounded-full text-[10px] font-black animate-pulse">
+                          Скопійовано!
+                        </span>
+                      )}
                     </a>
                     <div 
                       onClick={() => {
-                        alert('Чат з менеджером зараз недоступний. Будь ласка, зателефонуйте нам.');
+                        window.dispatchEvent(new CustomEvent('open-customer-chat'));
                         setActiveDropdown(null);
                       }}
                       className="pt-3 border-t border-gray-50 dark:border-gray-800"
@@ -329,7 +399,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                         >
                           <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-700">
                             <img 
-                              src={product.image || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
+                              src={getFirstProductImage(product.image) || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
                               alt={product.name}
                               className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                               referrerPolicy="no-referrer"
@@ -379,32 +449,32 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           </form>
         </div>
 
-        <div className="flex items-center space-x-2 md:space-x-4">
+        <div className="flex items-center space-x-1.5 sm:space-x-2 md:space-x-4">
           <button 
             onClick={() => setIsMobileSearchOpen(true)}
-            className="md:hidden flex items-center gap-2 p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50/50 dark:bg-gray-800/50 rounded-2xl active:scale-90 border border-gray-100/50 dark:border-gray-800/50"
+            className="md:hidden flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50/50 dark:bg-gray-800/50 rounded-xl active:scale-90 border border-gray-100/50 dark:border-gray-800/50"
           >
-            <Search size={20} />
+            <Search size={18} />
           </button>
 
           {onFilterOpen && (
             <button 
               onClick={onFilterOpen}
-              className="md:hidden flex items-center gap-2 p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-800 rounded-2xl active:scale-90 border border-gray-100 dark:border-gray-700"
+              className="md:hidden flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-850 rounded-xl active:scale-90 border border-gray-100 dark:border-gray-700"
             >
-              <SlidersHorizontal size={20} />
+              <SlidersHorizontal size={18} />
             </button>
           )}
 
           <button 
             onClick={toggleTheme}
-            className="flex items-center gap-2 p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-800 rounded-2xl active:scale-90 border border-gray-100 dark:border-gray-700"
+            className="flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-800 rounded-xl active:scale-90 border border-gray-100 dark:border-gray-700"
             title={isDark ? "Увімкнути світлу тему" : "Увімкнути темну тему"}
           >
             <span className="text-[10px] font-black uppercase tracking-widest hidden xl:block">
               {isDark ? 'Темна' : 'Світла'}
             </span>
-            {isDark ? <Moon size={20} /> : <Sun size={20} />}
+            {isDark ? <Moon size={18} /> : <Sun size={18} />}
           </button>
 
           <div className="h-6 w-[1px] bg-gray-100 dark:bg-gray-800 hidden md:block" />
@@ -481,8 +551,9 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           </div>
 
           <button 
+            id="header-cart-btn"
             onClick={onCartOpen}
-            className="p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-all bg-gray-50 dark:bg-gray-800 rounded-2xl relative active:scale-90"
+            className="hidden md:flex p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-all bg-gray-50 dark:bg-gray-800 rounded-2xl relative active:scale-90"
           >
             <ShoppingCart size={20} />
             {items.length > 0 && (
@@ -493,15 +564,16 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           </button>
           <button 
             onClick={() => setIsMobileMenuOpen(true)}
-            className="md:hidden p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-all bg-gray-50 dark:bg-gray-800 rounded-2xl active:scale-90"
+            className="md:hidden p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-all bg-gray-50 dark:bg-gray-800 rounded-xl active:scale-90"
           >
-            <Menu size={20} />
+            <Menu size={18} />
           </button>
         </div>
       </div>
 
 
-      {/* Mobile Menu */}
+    </header>
+    {createPortal(
       <AnimatePresence>
         {isMobileMenuOpen && (
           <>
@@ -510,14 +582,14 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100] md:hidden"
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[140] md:hidden"
             />
             <motion.div
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
               transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed left-0 top-0 h-full w-full max-w-[280px] bg-white shadow-2xl z-[110] md:hidden flex flex-col"
+              className="fixed left-0 top-0 h-full w-full max-w-[280px] bg-white dark:bg-gray-900 shadow-2xl z-[150] md:hidden flex flex-col"
             >
               <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
                 <span className="text-xl font-black text-blue-600">Меню</span>
@@ -564,7 +636,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                         }}
                         className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-all ${
                           (cat === 'Всі товари' && !selectedCategory) || selectedCategory === cat
-                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/20'
+                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
                             : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
                         }`}
                       >
@@ -577,15 +649,24 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                 <div className="space-y-4">
                   <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Контакти</h3>
                   <div className="space-y-3">
-                    <a href="tel:+380671234567" className="flex items-center space-x-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl group active:scale-95 transition-all">
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-xl">
-                        <Phone size={20} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-black text-gray-900 dark:text-white">Київстар</div>
-                        <div className="text-xs text-gray-500 font-medium">+380 67 123 4567</div>
-                      </div>
-                    </a>
+                     <a 
+                      href="tel:+380689180637" 
+                      onClick={(e) => handlePhoneClick(e, '+380689180637', 'MobileКиївстар')}
+                      className="flex items-center space-x-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl group active:scale-95 transition-all relative"
+                     >
+                       <div className="p-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-xl">
+                         <Phone size={20} />
+                       </div>
+                       <div className="flex-1">
+                         <div className="text-sm font-black text-gray-900 dark:text-white">Київстар</div>
+                         <div className="text-xs text-gray-500 font-medium">+380 68 918 0637</div>
+                       </div>
+                       {phoneCopied === 'MobileКиївстар' && (
+                         <span className="absolute right-4 px-2.5 py-1 bg-green-500 text-white rounded-full text-[10px] font-black animate-pulse">
+                           Скопійовано!
+                         </span>
+                       )}
+                     </a>
                     <Link 
                       to="/blog"
                       onClick={() => setIsMobileMenuOpen(false)}
@@ -602,15 +683,35 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                   </div>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900">
+              <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 space-y-2.5">
                 {user ? (
-                  <button 
-                    onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
-                    className="w-full flex items-center justify-center space-x-3 py-4 bg-red-50 text-red-500 rounded-2xl font-bold"
-                  >
-                    <LogOut size={20} />
-                    <span>Вийти з акаунта</span>
-                  </button>
+                  <>
+                    <Link 
+                      to="/profile" 
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className="w-full flex items-center justify-center space-x-3 py-3.5 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-2xl font-bold transition-all text-sm"
+                    >
+                      <User size={18} />
+                      <span>Мій профіль</span>
+                    </Link>
+                    {isAdmin && (
+                      <Link 
+                        to="/admin" 
+                        onClick={() => setIsMobileMenuOpen(false)}
+                        className="w-full flex items-center justify-center space-x-3 py-3.5 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl font-black transition-all text-sm shadow-md shadow-blue-600/10"
+                      >
+                        <Settings size={18} />
+                        <span>Адмін-панель ✨</span>
+                      </Link>
+                    )}
+                    <button 
+                      onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
+                      className="w-full flex items-center justify-center space-x-3 py-3.5 bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/40 text-red-500 rounded-2xl font-bold transition-all text-sm"
+                    >
+                      <LogOut size={18} />
+                      <span>Вийти з акаунта</span>
+                    </button>
+                  </>
                 ) : (
                   <Link 
                     to="/auth" 
@@ -625,6 +726,11 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
             </motion.div>
           </>
         )}
+      </AnimatePresence>,
+      document.body
+    )}
+    {createPortal(
+      <AnimatePresence>
         {isMobileSearchOpen && (
           <>
             <motion.div 
@@ -632,13 +738,13 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileSearchOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[110]"
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[140]"
             />
             <motion.div 
               initial={{ y: -100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: -100, opacity: 0 }}
-              className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 z-[120] p-4 shadow-2xl rounded-b-[32px] overflow-hidden"
+              className="fixed top-0 left-0 right-0 bg-white dark:bg-gray-900 z-[150] p-4 shadow-2xl rounded-b-[32px] overflow-hidden"
             >
               <form onSubmit={handleSearchSubmit} className="flex items-center gap-4 mb-4">
                 <div className="relative flex-1">
@@ -673,7 +779,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                       >
                         <div className="w-14 h-14 bg-white dark:bg-gray-900 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-800">
                           <img 
-                            src={product.image || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
+                            src={getFirstProductImage(product.image) || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
                             alt={product.name}
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
@@ -701,7 +807,9 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
             </motion.div>
           </>
         )}
-      </AnimatePresence>
-    </header>
+      </AnimatePresence>,
+      document.body
+    )}
+    </>
   );
 });

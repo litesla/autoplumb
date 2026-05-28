@@ -5,6 +5,7 @@ import { motion } from 'motion/react';
 import { Calendar, User, Clock, ArrowLeft, Share2, Bookmark, Facebook, Twitter, Link as LinkIcon, ChevronRight } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { BlogPost } from './BlogPage';
+import { fallbackBlogPosts } from '../data/fallbackPosts';
 
 export const ArticlePage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -18,23 +19,35 @@ export const ArticlePage: React.FC = () => {
 
     const fetchPost = async () => {
       try {
-        const { data, error } = await supabase
+        let postData: BlogPost | null = null;
+
+        // 1. Try fetching from Supabase
+        const { data } = await supabase
           .from('blog')
           .select('*')
           .eq('id', id)
-          .single();
-        
+          .maybeSingle();
+
         if (data) {
           const rawPost = data as any;
-          const postData: BlogPost = {
+          postData = {
             ...rawPost,
             image: rawPost.image_url || rawPost.image || '',
             readTime: rawPost.read_time || rawPost.readTime || '',
             createdAt: rawPost.created_at || rawPost.createdAt || new Date().toISOString()
           };
+        } else {
+          // 2. Fall back to local posts
+          const fb = fallbackBlogPosts.find(p => p.id === id);
+          if (fb) {
+            postData = fb as BlogPost;
+          }
+        }
+
+        if (postData) {
           setPost(postData);
           
-          // Fetch related posts
+          // Fetch related posts from Supabase or Fallback
           const { data: related } = await supabase
             .from('blog')
             .select('*')
@@ -42,13 +55,18 @@ export const ArticlePage: React.FC = () => {
             .neq('id', id)
             .limit(3);
           
-          if (related) {
+          if (related && related.length > 0) {
             setRelatedPosts(related.map(p => ({
               ...p,
               image: (p as any).image_url || (p as any).image || '',
               readTime: (p as any).read_time || (p as any).readTime || '',
               createdAt: (p as any).created_at || (p as any).createdAt || new Date().toISOString()
             })) as BlogPost[]);
+          } else {
+            // Fallback related posts
+            setRelatedPosts(fallbackBlogPosts
+              .filter(p => p.category === postData!.category && p.id !== id)
+              .slice(0, 3) as BlogPost[]);
           }
         } else {
           navigate('/blog');

@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { WishlistProvider } from './context/WishlistContext';
 import { CompareProvider } from './context/CompareContext';
 import { Header } from './components/Header';
+import { CustomerChatWidget } from './components/CustomerChatWidget';
 import { CartDrawer } from './components/CartDrawer';
 import { HomePage } from './pages/HomePage';
 import { AdminPage } from './pages/AdminPage';
@@ -20,7 +21,7 @@ import { BlogPage } from './pages/BlogPage';
 import { ArticlePage } from './pages/ArticlePage';
 import ProductPage from './pages/ProductPage';
 import { WelcomeModal } from './components/WelcomeModal';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ArrowUp, Package, Settings as SettingsIcon } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -30,6 +31,8 @@ import { supabase } from './lib/supabaseClient';
 import { useAuth } from './context/AuthContext';
 
 const AppContent = () => {
+  const location = useLocation();
+  const isAdminRoute = location.pathname.startsWith('/admin');
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [isMaintenance, setIsMaintenance] = useState(false);
@@ -136,7 +139,8 @@ const AppContent = () => {
 
   return (
     <div className="min-h-screen bg-white dark:bg-black font-['Inter',sans-serif] transition-colors duration-300">
-      <div className="sticky top-0 z-[110]">
+      {!isAdminRoute && (
+        <div className="sticky top-0 z-[110]">
           {isQuotaExceeded && (
             <div className="bg-red-600 text-white py-3 px-4 text-center text-sm font-black flex items-center justify-center gap-3 animate-slide-in">
               <Package size={18} />
@@ -162,6 +166,7 @@ const AppContent = () => {
             }}
           />
         </div>
+      )}
         
         <Routes>
           <Route path="/" element={<HomePage />} />
@@ -187,13 +192,15 @@ const AppContent = () => {
           }}
         />
 
-        <BottomNav 
-          onCartOpen={() => setIsCartOpen(prev => !prev)}
-          onCategoriesOpen={() => headerRef.current?.openMobileMenu()}
-        />
+        {!isAdminRoute && (
+          <BottomNav 
+            onCartOpen={() => setIsCartOpen(prev => !prev)}
+            onCategoriesOpen={() => headerRef.current?.openMobileMenu()}
+          />
+        )}
 
         <AnimatePresence>
-          {showBackToTop && (
+          {showBackToTop && !isAdminRoute && (
             <motion.button
               initial={{ opacity: 0, scale: 0.5 }}
               animate={{ opacity: 1, scale: 1 }}
@@ -206,23 +213,26 @@ const AppContent = () => {
           )}
         </AnimatePresence>
 
-        <footer className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 py-16 transition-colors">
-          <div className="container mx-auto px-4">
-            <div className="flex flex-col md:flex-row justify-between items-center gap-8">
-              <div className="text-center md:text-left">
-                <div className="text-2xl font-black text-gray-900 dark:text-white tracking-tight mb-2">AutoPlumb</div>
-                <p className="text-gray-400 text-sm font-medium">© 2026 AutoPlumb. Всі права захищені.</p>
-              </div>
-              
-              <div className="flex flex-wrap justify-center gap-8 text-sm font-bold text-gray-500 dark:text-gray-400">
-                <Link to="/legal/privacy" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Політика конфіденційності</Link>
-                <Link to="/legal/terms" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Публічна оферта</Link>
-                <Link to="/legal/cookies" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Файли Cookie</Link>
+        {!isAdminRoute && (
+          <footer className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 py-16 transition-colors">
+            <div className="container mx-auto px-4">
+              <div className="flex flex-col md:flex-row justify-between items-center gap-8">
+                <div className="text-center md:text-left">
+                  <div className="text-2xl font-black text-gray-900 dark:text-white tracking-tight mb-2">AutoPlumb</div>
+                  <p className="text-gray-400 text-sm font-medium">© 2026 AutoPlumb. Всі права захищені.</p>
+                </div>
+                
+                <div className="flex flex-wrap justify-center gap-8 text-sm font-bold text-gray-500 dark:text-gray-400">
+                  <Link to="/legal/privacy" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Політика конфіденційності</Link>
+                  <Link to="/legal/terms" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Публічна оферта</Link>
+                  <Link to="/legal/cookies" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Файли Cookie</Link>
+                </div>
               </div>
             </div>
-          </div>
-        </footer>
-        <WelcomeModal />
+          </footer>
+        )}
+        {!isAdminRoute && <WelcomeModal />}
+        {!isAdminRoute && <CustomerChatWidget />}
     </div>
   );
 };

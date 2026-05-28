@@ -4,12 +4,38 @@ import { Hero } from '../components/Hero';
 import { ProductCard } from '../components/ProductCard';
 import { FilterSidebar } from '../components/FilterSidebar';
 import { useShop } from '../context/ShopContext';
-import { Product } from '../lib/utils';
+import { Product, getExpandedSearchTerms, getSearchKeywords } from '../lib/utils';
 import { SlidersHorizontal, ArrowRight, Car, Droplets, Package, AlertTriangle, Settings } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
+import { motion } from 'motion/react';
 
 const ITEMS_PER_PAGE = 24;
+
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.04,
+      delayChildren: 0.05
+    }
+  }
+} as const;
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20, scale: 0.96 },
+  visible: { 
+    opacity: 1, 
+    y: 0, 
+    scale: 1,
+    transition: { 
+      type: "spring" as const, 
+      stiffness: 300, 
+      damping: 22 
+    } 
+  }
+} as const;
 
 export const HomePage: React.FC = () => {
   const { mode, setMode, searchQuery, selectedCategory, priceRange, selectedBrands } = useShop();
@@ -49,23 +75,54 @@ export const HomePage: React.FC = () => {
 
       let query = supabase
         .from('products')
-        .select('*');
+        .select('*', { count: 'exact' });
 
-      // Only apply basic range for pagination to ensure we always get SOMETHING
-      query = query
-        .range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
+      // Apply range for pagination
+      query = query.range(pageNumber * ITEMS_PER_PAGE, (pageNumber + 1) * ITEMS_PER_PAGE - 1);
 
-      // Other filters are optional and shouldn't block the initial load
+      // Apply type restriction
       if (mode) {
         query = query.eq('type', mode);
       }
 
+      // Apply category restriction
       if (selectedCategory) {
         query = query.eq('category', selectedCategory);
       }
 
+      // Apply price range restriction
+      if (priceRange) {
+        query = query.gte('price', priceRange[0]).lte('price', priceRange[1]);
+      }
+
+      // Apply brand filtering
+      if (selectedBrands && selectedBrands.length > 0) {
+        query = query.in('brand', selectedBrands);
+      }
+
+      // Smart multi-word search query handling with layout conversion, stemming, and synonym lookups
       if (searchQuery) {
-        query = query.or(`name.ilike.%${searchQuery}%,description.ilike.%${searchQuery}%,article.ilike.%${searchQuery}%`);
+        const words = getSearchKeywords(searchQuery);
+        if (words.length > 0) {
+          words.forEach(word => {
+            const expanded = getExpandedSearchTerms(word);
+            if (expanded.length > 0) {
+              const orConditions = expanded.map(term => 
+                `name.ilike.%${term}%,description.ilike.%${term}%,brand.ilike.%${term}%,article.ilike.%${term}%`
+              ).join(',');
+              query = query.or(orConditions);
+            }
+          });
+        } else {
+          // Fallback if all words are stop words
+          const expanded = getExpandedSearchTerms(searchQuery);
+          if (expanded.length > 0) {
+            const orConditions = expanded.map(term => 
+              `name.ilike.%${term}%,description.ilike.%${term}%,brand.ilike.%${term}%,article.ilike.%${term}%`
+            ).join(',');
+            query = query.or(orConditions);
+          }
+        }
       }
 
       const { data, error, count } = await query;
@@ -74,10 +131,9 @@ export const HomePage: React.FC = () => {
         console.error('Supabase fetch error:', error);
       }
 
-      if (error || (isInitial && (!data || data.length === 0))) {
-        console.log('No products found with filters, attempting raw fetch fallback...');
-        
-        // If anything fails or NO results found with filters, fetch EVERYTHING raw
+      // Only attempt fallback if there is a DB error or if the DB table itself is completely empty
+      if (error || (isInitial && dbCount === 0)) {
+        console.log('Attempting raw fallback because of error or empty database...');
         const { data: rawData, error: rawError, count: rawCount } = await supabase
           .from('products')
           .select('*', { count: 'exact' })
@@ -89,7 +145,6 @@ export const HomePage: React.FC = () => {
         }
         
         if (rawData && rawData.length > 0) {
-          console.log(`Found ${rawData.length} products via raw fallback.`);
           const mapped = rawData.map(item => ({ ...item, image: item.image_url || item.image || '', type: item.type || 'auto' }));
           if (isInitial) setProducts(mapped as Product[]);
           else setProducts(prev => [...prev, ...mapped as Product[]]);
@@ -98,11 +153,10 @@ export const HomePage: React.FC = () => {
           return;
         }
         
-        console.warn('Database seems to be completely empty.');
-        // If even raw fetch is empty, ensure state is updated
         if (isInitial) {
           setProducts([]);
           setTotalCount(0);
+          setHasMore(false);
         }
         return;
       }
@@ -246,11 +300,18 @@ export const HomePage: React.FC = () => {
               </div>
             ) : (
               <>
-                <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8">
+                <motion.div 
+                  variants={containerVariants}
+                  initial="hidden"
+                  animate="visible"
+                  className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8"
+                >
                   {products.map(product => (
-                    <ProductCard key={product.id} product={product} />
+                    <motion.div key={product.id} variants={itemVariants} className="h-full">
+                      <ProductCard product={product} />
+                    </motion.div>
                   ))}
-                </div>
+                </motion.div>
                 
                 {hasMore && (
                   <div className="mt-16 flex justify-center">

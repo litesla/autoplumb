@@ -83,6 +83,34 @@
         "maintenanceMode": { "type": "boolean", "description": "Whether the app is in maintenance mode" },
         "updatedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "Chat": {
+      "title": "Chat",
+      "description": "An online chat session",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "customerEmail": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "closed"] },
+        "userId": { "type": "string" }
+      },
+      "required": ["customerName", "lastMessage", "lastMessageAt"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "An individual chat message",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "senderType": { "type": "string", "enum": ["customer", "admin"] },
+        "text": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["senderId", "senderName", "senderType", "text"]
     }
   },
   "firestore": {
@@ -109,6 +137,14 @@
     "/content/settings": {
       "schema": "AppSettings",
       "description": "Global system settings"
+    },
+    "/chats": {
+      "schema": "Chat",
+      "description": "Online support chat sessions"
+    },
+    "/chats/{chatId}/messages": {
+      "schema": "ChatMessage",
+      "description": "Real-time messages in a session"
     }
   }
 }

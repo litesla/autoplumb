@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck, Bell } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck, Bell, Menu, MessageSquare } from 'lucide-react';
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
+import { AdminChatTab } from '../components/AdminChatTab';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -10,13 +11,317 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { supabase } from '../lib/supabaseClient';
 import { getColumnMapping, ColumnMapping } from '../services/geminiService';
 
+export function cleanProductNameAndType(name: string, defaultType: string = 'auto') {
+  let cleanName = name.trim();
+  let finalType = defaultType;
+
+  // 1. Plumbing Pattern: "Сантехніка — ", "Сантехніка - ", "Сантехніка—", etc.
+  const prefixRegex = /^сантехніка\s*([-—–:·•/|\\~]+)?\s*/i;
+  
+  if (prefixRegex.test(cleanName)) {
+    cleanName = cleanName.replace(prefixRegex, '').trim();
+    finalType = 'plumbing';
+  }
+
+  // 2. Tractor / Spare parts Pattern:
+  // e.g. "Запчастина для трактора МТЗ ЮМЗ: ", "Запчастини до тракторів", "МТЗ/ЮМЗ —", "МТЗ-ЮМЗ -", etc.
+  const tractorPrefixRegex = /^(?:запчастини?\s+(?:до|для)\s+трактор(?:ів|а)(?:\s+(?:мтз|юмз))?(?:\s+(?:мтз|юмз))?|мтз\s*[\/\\-—–:·•]+\s*юмз|мтз\s+юмз|юмз|мтз)\s*([-—–:·•/|\\~]+)?\s*/i;
+  
+  if (tractorPrefixRegex.test(cleanName)) {
+    cleanName = cleanName.replace(tractorPrefixRegex, '').trim();
+  } else {
+    // Fallback prefix matching for more general cases ("Запчастини для тракторів:", "Запчастина до трактора:")
+    const fallbackTractorRegex = /^запчастини?\s+(?:до|для)\s+трактор(?:ів|а)(?:\s*мтз)?(?:\s*юмз)?[:\s]*/i;
+    if (fallbackTractorRegex.test(cleanName)) {
+      cleanName = cleanName.replace(fallbackTractorRegex, '').trim();
+    }
+  }
+
+  // Capitalize first letter of cleanName
+  if (cleanName) {
+    cleanName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+  }
+
+  return { cleanName, finalType };
+}
+
+export function processAndConvertImageUrls(value: string): string {
+  if (!value) return '';
+  // Split only by commas that are followed by http or data: URL scheme to preserve parameter commas inside CDN images
+  const parts = value.split(/,(?=\s*(?:https?:|data:))/i);
+  const processedParts = parts.map(part => {
+    let clean = part.trim();
+    if (!clean) return '';
+
+    // 1. Google Drive Link:
+    // e.g. https://drive.google.com/file/d/12345/view?usp=sharing
+    // or https://drive.google.com/open?id=12345
+    const gdFileIdMatch = clean.match(/\/file\/d\/([a-zA-Z0-9_-]+)/) || clean.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+    if (clean.includes('drive.google.com') && gdFileIdMatch && gdFileIdMatch[1]) {
+      return `https://drive.google.com/uc?export=view&id=${gdFileIdMatch[1]}`;
+    }
+
+    // 2. Google Images "imgres" link:
+    // e.g. https://www.google.com/imgres?imgurl=https%3A%2F%2Fexample.com%2Fimg.jpg&imgrefurl=...
+    if (clean.includes('google.') && clean.includes('/imgres')) {
+      try {
+        const urlObj = new URL(clean);
+        const imgUrlParam = urlObj.searchParams.get('imgurl');
+        if (imgUrlParam) {
+          return decodeURIComponent(imgUrlParam);
+        }
+      } catch (e) {
+        const regexMatch = clean.match(/[?&]imgurl=([^&]+)/);
+        if (regexMatch && regexMatch[1]) {
+          return decodeURIComponent(regexMatch[1]);
+        }
+      }
+    }
+
+    // 3. Keep other links
+    return clean;
+  });
+
+  return processedParts.filter(Boolean).join(', ');
+}
+
+export function getFirstImage(value?: string | null): string {
+  if (!value) return '';
+  const parts = value.split(/,(?=\s*(?:https?:|data:))/i);
+  return parts[0]?.trim() || '';
+}
+
+export function splitImages(value?: string | null): string[] {
+  if (!value) return [];
+  return value.split(/,(?=\s*(?:https?:|data:))/i).map(s => s.trim()).filter(Boolean);
+}
+
+export function findHeaderRowIndex(rawData: any[][]): number {
+  let bestIndex = 0;
+  let maxScore = 0;
+
+  for (let i = 0; i < Math.min(rawData.length, 30); i++) {
+    const row = rawData[i];
+    if (!row || !Array.isArray(row)) continue;
+
+    const textColumnCount = row.filter(cell => cell !== undefined && cell !== null && cell.toString().trim().length > 0).length;
+    if (textColumnCount < 3) continue;
+
+    const rowText = row.map(c => c ? c.toString().toLowerCase() : "").join(' ');
+    
+    let score = 0;
+    
+    if (rowText.includes('назва') || rowText.includes('товар') || rowText.includes('наименование') || rowText.includes('name') || rowText.includes('seo')) {
+      score += 10;
+    }
+    if (rowText.includes('ціна') || rowText.includes('цена') || rowText.includes('price') || rowText.includes('вартість') || rowText.includes('грн')) {
+      score += 10;
+    }
+    if (rowText.includes('розділ') || rowText.includes('категор') || rowText.includes('category')) {
+      score += 3;
+    }
+    if (rowText.includes('опис') || rowText.includes('description') || rowText.includes('seo')) {
+      score += 3;
+    }
+    if (rowText.includes('бренд') || rowText.includes('brand') || rowText.includes('виробник') || rowText.includes('країна')) {
+      score += 3;
+    }
+    if (rowText.includes('артикул') || rowText.includes('article') || rowText.includes('код')) {
+      score += 3;
+    }
+
+    score += textColumnCount * 0.1;
+
+    if (score > maxScore) {
+      maxScore = score;
+      bestIndex = i;
+    }
+
+    if (score >= 20) {
+      return i;
+    }
+  }
+
+  return bestIndex;
+}
+
+interface MultiImageUploaderProps {
+  imagesString: string;
+  onChange: (newVal: string) => void;
+  label?: string;
+}
+
+const MultiImageUploader: React.FC<MultiImageUploaderProps> = ({ imagesString, onChange, label }) => {
+  const [compressing, setCompressing] = useState(false);
+
+  const images = splitImages(imagesString);
+
+  const compressAndConvertImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxDim = 800; // Optimal size for database storage and snappy mobile loads
+          if (width > maxDim || height > maxDim) {
+            if (width > height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(img, 0, 0, width, height);
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.72); // Efficient Web Quality
+            resolve(dataUrl);
+          } else {
+            resolve(e.target?.result as string || '');
+          }
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files || e.target.files.length === 0) return;
+    setCompressing(true);
+    try {
+      const pFiles = Array.from(e.target.files);
+      const convertedList: string[] = [];
+      for (const file of pFiles) {
+        const compressedB64 = await compressAndConvertImage(file);
+        if (compressedB64) {
+          convertedList.push(compressedB64);
+        }
+      }
+      
+      const updatedImages = [...images, ...convertedList];
+      onChange(updatedImages.join(', '));
+    } catch (err) {
+      console.error('File conversion error:', err);
+    } finally {
+      setCompressing(false);
+      // Reset input value so same file can be tapped again
+      e.target.value = '';
+    }
+  };
+
+  const handleRemoveImage = (indexToRemove: number) => {
+    const updated = images.filter((_, idx) => idx !== indexToRemove);
+    onChange(updated.join(', '));
+  };
+
+  return (
+    <div className="space-y-3 font-sans">
+      {label && <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">{label}</label>}
+      
+      {/* Upload trigger zone optimized for mobile touch state */}
+      <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+        <label className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-gray-200 dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-400 bg-gray-50/50 dark:bg-zinc-800/40 rounded-2xl p-4 sm:p-5 text-center cursor-pointer transition-all hover:bg-white dark:hover:bg-zinc-800 active:scale-[0.98]">
+          <input 
+            type="file" 
+            accept="image/*" 
+            multiple 
+            onChange={handleFileChange} 
+            className="hidden" 
+          />
+          <div className="space-y-1">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 mb-2">
+              <Upload size={20} className={compressing ? 'animate-bounce' : ''} />
+            </div>
+            <p className="text-xs sm:text-sm font-black text-gray-800 dark:text-zinc-200">
+              {compressing ? 'Опрацювання фото...' : 'Додати фото з телефону / камери'}
+            </p>
+            <p className="text-[10px] text-gray-400 dark:text-zinc-500 font-bold uppercase tracking-wider">
+              Можна вибрати декілька зображень
+            </p>
+          </div>
+        </label>
+      </div>
+
+      {/* Grid of existing/preview images */}
+      {images.length > 0 && (
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2 sm:gap-3 p-3 bg-gray-50 dark:bg-zinc-950/60 rounded-2xl border border-gray-100 dark:border-zinc-800/80">
+          {images.map((url, idx) => (
+            <div key={idx} className="relative aspect-square rounded-xl bg-white dark:bg-zinc-900 border border-gray-150 dark:border-zinc-800 overflow-hidden group">
+              <img 
+                src={url} 
+                alt={`Uploaded preview ${idx + 1}`} 
+                className="w-full h-full object-cover" 
+                referrerPolicy="no-referrer"
+                onError={(e) => {
+                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/150?text=Error';
+                }}
+              />
+              
+              {/* Badge representing position */}
+              <div className="absolute bottom-1 left-1.5 bg-black/60 text-[9px] text-white px-1.5 py-0.5 rounded-full font-black">
+                #{idx + 1}
+              </div>
+
+              {/* Individual quick remove button */}
+              <button
+                type="button"
+                onClick={() => handleRemoveImage(idx)}
+                className="absolute top-1 right-1 bg-red-600 hover:bg-red-700 text-white p-1 rounded-lg active:scale-90 transition-all cursor-pointer shadow-md"
+                title="Видалити це фото"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Manual text input for power-users to paste links quickly */}
+      <div className="space-y-1">
+        <details className="text-gray-400 text-[10px]">
+          <summary className="cursor-pointer font-bold select-none hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+            Розширене керування або вставити посилання вручну
+          </summary>
+          <div className="mt-2 space-y-1">
+            <textarea 
+              value={imagesString}
+              onChange={e => onChange(e.target.value)}
+              className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-[9px] text-gray-500 h-16 resize-none leading-relaxed"
+              placeholder="https://img1.jpg, https://img2.jpg ..."
+            />
+          </div>
+        </details>
+      </div>
+
+    </div>
+  );
+};
+
 export const AdminPage: React.FC = () => {
   const { isAdmin, loading } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'content' | 'settings' | 'blog' | 'diagnostics'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'content' | 'settings' | 'blog' | 'diagnostics' | 'chat'>('dashboard');
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [showDbOps, setShowDbOps] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [totalProductsCount, setTotalProductsCount] = useState(0);
   const [productSearch, setProductSearch] = useState('');
+  const [debouncedProductSearch, setDebouncedProductSearch] = useState('');
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedProductSearch(productSearch);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [productSearch]);
+
   const [visibleProductsCount, setVisibleProductsCount] = useState(50);
   const [orders, setOrders] = useState<Order[]>([]);
   const [blogPosts, setBlogPosts] = useState<BlogPost[]>([]);
@@ -33,6 +338,107 @@ export const AdminPage: React.FC = () => {
   const [isSyncingUTR, setIsSyncingUTR] = useState(false);
   const [newOrderNotification, setNewOrderNotification] = useState<any>(null);
   const [isRealtimeEnabled, setIsRealtimeEnabled] = useState(true);
+  const [isFixingPlumbing, setIsFixingPlumbing] = useState(false);
+  const [isFixingTractor, setIsFixingTractor] = useState(false);
+
+  const handleFixPlumbingPrefixes = async () => {
+    setIsFixingPlumbing(true);
+    try {
+      // Find all products that start with any casing of "сантехніка"
+      const matching = products.filter(p => {
+        const nameTrimmed = p.name.trim().toLowerCase();
+        return nameTrimmed.startsWith('сантехніка') && nameTrimmed.length > 10;
+      });
+
+      if (matching.length === 0) {
+        alert('Не знайдено товарів, які потребують виправлення.');
+        setIsFixingPlumbing(false);
+        return;
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const p of matching) {
+        const { cleanName, finalType } = cleanProductNameAndType(p.name, 'plumbing');
+        
+        let updatedCategory = p.category || 'Сантехніка';
+        if (updatedCategory === 'Загальне' || updatedCategory === 'Загальна') {
+          updatedCategory = 'Сантехніка';
+        }
+
+        const { error } = await supabase
+          .from('products')
+          .update({
+            name: cleanName,
+            type: finalType,
+            category: updatedCategory
+          })
+          .eq('id', p.id);
+
+        if (error) {
+          console.error(`Error updating product ${p.id}:`, error);
+          errorCount++;
+        } else {
+          successCount++;
+        }
+      }
+
+      alert(`Успішно виправлено: ${successCount} товарів. Помилок: ${errorCount}`);
+      await refreshAllData();
+    } catch (e: any) {
+      console.error(e);
+      alert('Помилка при виправленні товарів: ' + e.message);
+    } finally {
+      setIsFixingPlumbing(false);
+    }
+  };
+
+  const handleFixTractorPrefixes = async () => {
+    setIsFixingTractor(true);
+    try {
+      // Find all products where cleaning their name changes them
+      const matching = products.filter(p => {
+        const { cleanName } = cleanProductNameAndType(p.name, p.type);
+        return cleanName !== p.name.trim();
+      });
+
+      if (matching.length === 0) {
+        alert('Не знайдено товарів, які потребують виправлення тракторних префіксів.');
+        setIsFixingTractor(false);
+        return;
+      }
+
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const p of matching) {
+        const { cleanName } = cleanProductNameAndType(p.name, p.type);
+
+        const { error } = await supabase
+          .from('products')
+          .update({
+            name: cleanName
+          })
+          .eq('id', p.id);
+
+        if (error) {
+          console.error(`Error updating product ${p.id}:`, error);
+          errorCount++;
+        } else {
+          successCount++;
+        }
+      }
+
+      alert(`Успішно очищено назви: ${successCount} товарів. Помилок: ${errorCount}`);
+      await refreshAllData();
+    } catch (e: any) {
+      console.error(e);
+      alert('Помилка при виправленні тракторних префіксів: ' + e.message);
+    } finally {
+      setIsFixingTractor(false);
+    }
+  };
 
   // Sound for notification
   const playNotificationSound = () => {
@@ -111,8 +517,21 @@ export const AdminPage: React.FC = () => {
     description: '',
     image: '',
     stock: 1,
-    type: 'auto' as 'auto' | 'plumbing'
+    type: 'auto' as 'auto' | 'plumbing',
+    brand: '',
+    article: '',
+    specs: ''
   });
+  const [editedProductIds, setEditedProductIds] = useState<(string | number)[]>(() => {
+    try {
+      const saved = localStorage.getItem('edited_product_ids');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [templateSearchText, setTemplateSearchText] = useState('');
+  const [clonedFromProductName, setClonedFromProductName] = useState<string | null>(null);
   const [newPost, setNewPost] = useState({
     title: '',
     excerpt: '',
@@ -122,6 +541,7 @@ export const AdminPage: React.FC = () => {
     image: '',
     readTime: '5 хв'
   });
+  const [blogSearch, setBlogSearch] = useState('');
 
   useEffect(() => {
     if (!loading && !isAdmin) {
@@ -169,9 +589,27 @@ export const AdminPage: React.FC = () => {
     setIsRefreshing(true);
     
     try {
+      let prodQuery = supabase.from('products').select('*');
+      const searchTrimmed = debouncedProductSearch.trim();
+      if (searchTrimmed) {
+        // Sanitize commas/parens to prevent breaking PostgREST or select query
+        const sanitized = searchTrimmed.replace(/[,()]/g, '');
+        if (sanitized) {
+          const lower = sanitized.toLowerCase();
+          let orConditions = `name.ilike.%${sanitized}%,article.ilike.%${sanitized}%,brand.ilike.%${sanitized}%,category.ilike.%${sanitized}%`;
+          if (lower.includes('авт') || lower.includes('aut')) {
+            orConditions += `,type.eq.auto`;
+          }
+          if (lower.includes('сант') || lower.includes('санх') || lower.includes('plum')) {
+            orConditions += `,type.eq.plumbing`;
+          }
+          prodQuery = prodQuery.or(orConditions);
+        }
+      }
+
       const [resCount, resProducts, resOrders, resBlog] = await Promise.all([
         supabase.from('products').select('*', { count: 'exact', head: true }),
-        supabase.from('products').select('*').order('created_at', { ascending: false }).limit(100),
+        prodQuery.order('created_at', { ascending: false }).limit(200),
         supabase.from('orders').select('*').order('created_at', { ascending: false }),
         supabase.from('blog').select('*').order('created_at', { ascending: false })
       ]);
@@ -222,7 +660,7 @@ export const AdminPage: React.FC = () => {
 
   useEffect(() => {
     refreshAllData();
-  }, [isAdmin, productSearch]);
+  }, [isAdmin, debouncedProductSearch]);
 
   const seedInitialData = async () => {
     const initialProducts = [
@@ -239,10 +677,10 @@ export const AdminPage: React.FC = () => {
       { name: 'Труба металопластикова 16мм', price: 45, category: 'Труби', description: 'Ціна за метр. Надійна труба для опалення.', image: 'https://images.unsplash.com/photo-1542013936693-884638332954?auto=format&fit=crop&q=80&w=400', stock: 100, type: 'plumbing', brand: 'Valtec', specs: '{"Діаметр": "16мм"}' }
     ];
 
-    for (const product of initialProducts) {
+    for (const { image, ...productRest } of initialProducts) {
       await supabase.from('products').insert({
-        ...product,
-        image_url: product.image,
+        ...productRest,
+        image_url: image,
         created_at: new Date().toISOString()
       });
     }
@@ -560,6 +998,26 @@ export const AdminPage: React.FC = () => {
     XLSX.writeFile(wb, "products_template.xlsx");
   };
 
+  const handleExportProducts = (targetProducts?: Product[]) => {
+    const listToExport = targetProducts || products;
+    const data = listToExport.map(p => ({
+      "ID": p.id,
+      "Назва": p.name,
+      "Ціна (грн)": p.price,
+      "Категорія": p.category,
+      "Артикул": p.article || '',
+      "Бренд": p.brand || '',
+      "Опис": p.description || '',
+      "Зображення (URL)": p.image || p.image_url || '',
+      "Тип": p.type,
+      "Кількість (Склад)": p.stock,
+    }));
+    const ws = XLSX.utils.json_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Products");
+    XLSX.writeFile(wb, `products_export_${new Date().toISOString().split('T')[0]}.xlsx`);
+  };
+
   const getChartData = () => {
     const last7Days = [...Array(7)].map((_, i) => {
       const d = new Date();
@@ -589,32 +1047,61 @@ export const AdminPage: React.FC = () => {
 
   const handleAddProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    setIsRefreshing(true); // Reuse refreshing state as loading indicator
     try {
+      let parsedSpecs = null;
+      if (newProduct.specs) {
+        try {
+          parsedSpecs = JSON.parse(newProduct.specs);
+        } catch {
+          parsedSpecs = newProduct.specs;
+        }
+      }
+
+      const cleanImageUrl = processAndConvertImageUrls(newProduct.image);
+
       const { error } = await supabase.from('products').insert({
-        ...newProduct,
-        image_url: newProduct.image,
-        stock: Number(newProduct.stock) || 1
+        name: newProduct.name,
+        price: Number(newProduct.price),
+        category: newProduct.category,
+        description: newProduct.description,
+        image_url: cleanImageUrl,
+        stock: Number(newProduct.stock) || 1,
+        type: newProduct.type,
+        brand: newProduct.brand,
+        article: newProduct.article,
+        specs: parsedSpecs,
+        created_at: new Date().toISOString()
       });
+      
       if (error) throw error;
+      
       setIsAddingProduct(false);
-      setNewProduct({ name: '', price: 0, category: '', description: '', image: '', stock: 1, type: 'auto' });
-      alert('Товар успішно додано!');
-      setProductSearch(''); // Trigger refresh
-    } catch (err) {
-      alert('Помилка при додаванні товару');
+      setNewProduct({ name: '', price: 0, category: '', description: '', image: '', stock: 1, type: 'auto', brand: '', article: '', specs: '' });
+      setClonedFromProductName(null);
+      alert('Товар успішно додано до бази даних!');
+      await refreshAllData(); // Force immediate refresh from DB
+    } catch (err: any) {
+      console.error('Add product error:', err);
+      alert(`Помилка при додаванні: ${err.message || 'невідома помилка'}`);
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
   const handleConfirmDelete = async () => {
     if (productToDelete) {
+      setIsRefreshing(true);
       try {
         const { error } = await supabase.from('products').delete().eq('id', productToDelete.id);
         if (error) throw error;
         setProductToDelete(null);
-        setProducts(prev => prev.filter(p => p.id !== productToDelete.id));
-      } catch (err) {
+        await refreshAllData();
+      } catch (err: any) {
         console.error('Delete product error:', err);
-        alert('Помилка при видаленні товару');
+        alert(`Помилка при видаленні: ${err.message}`);
+      } finally {
+        setIsRefreshing(false);
       }
     }
   };
@@ -627,12 +1114,48 @@ export const AdminPage: React.FC = () => {
     e.preventDefault();
     if (!editingProduct) return;
     
-    const { id, ...data } = editingProduct;
-    await supabase.from('products').update({
-      ...data,
-      image_url: data.image
-    }).eq('id', id);
-    setEditingProduct(null);
+    setIsRefreshing(true);
+    try {
+      const { id, created_at, ...rawUpdateData } = editingProduct as any;
+      
+      const cleanImageUrl = processAndConvertImageUrls(rawUpdateData.image ?? '');
+      
+      // Clean up data to avoid sending invalid columns or id
+      const updateData = {
+        name: rawUpdateData.name,
+        price: Number(rawUpdateData.price),
+        category: rawUpdateData.category,
+        description: rawUpdateData.description,
+        image_url: cleanImageUrl,
+        stock: Number(rawUpdateData.stock),
+        type: rawUpdateData.type,
+        brand: rawUpdateData.brand,
+        article: rawUpdateData.article,
+        specs: typeof rawUpdateData.specs === 'object' ? JSON.stringify(rawUpdateData.specs) : rawUpdateData.specs
+      };
+
+      const { error } = await supabase
+        .from('products')
+        .update(updateData)
+        .eq('id', id);
+
+      if (error) throw error;
+      
+      setEditingProduct(null);
+      // Track recently edited product ID
+      setEditedProductIds(prev => {
+        const updated = Array.from(new Set([id, ...prev])).slice(0, 10);
+        localStorage.setItem('edited_product_ids', JSON.stringify(updated));
+        return updated;
+      });
+      alert('Зміни збережено для всіх користувачів!');
+      await refreshAllData();
+    } catch (err: any) {
+      console.error('Update product error:', err);
+      alert(`Помилка при збереженні: ${err.message}`);
+    } finally {
+      setIsRefreshing(false);
+    }
   };
 
   const handleUpdateOrderStatus = async (id: string | number, status: string) => {
@@ -768,27 +1291,7 @@ export const AdminPage: React.FC = () => {
         const rawData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
 
         // Find the header row index (row with multiple columns with text)
-        let headerRowIndex = -1;
-        let maxColumnsWithText = 0;
-        
-        for (let i = 0; i < Math.min(rawData.length, 30); i++) {
-          const row = rawData[i];
-          const textColumnCount = row.filter(cell => cell && cell.toString().trim().length > 1).length;
-          
-          // Check for "назва" or "товар" as a strong hint
-          const rowText = row.join(' ').toLowerCase();
-          const hasNameHint = rowText.includes('назва') || rowText.includes('товар') || rowText.includes('наименование');
-          
-          if (textColumnCount >= 3 && (textColumnCount > maxColumnsWithText || hasNameHint)) {
-            maxColumnsWithText = textColumnCount;
-            headerRowIndex = i;
-            if (hasNameHint) break; // Strong match
-          }
-        }
-
-        if (headerRowIndex === -1) {
-          headerRowIndex = 0; // Fallback
-        }
+        const headerRowIndex = findHeaderRowIndex(rawData);
 
         const allRows = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" }) as any[];
         
@@ -799,7 +1302,10 @@ export const AdminPage: React.FC = () => {
         }
 
         // Pre-calculate column mapping for better performance
-        const headers = Object.keys(allRows[0]);
+        const parsedKeys = allRows[0] ? Object.keys(allRows[0]) : [];
+        const rawHeaders = rawData[headerRowIndex] ? rawData[headerRowIndex].map(h => h ? h.toString().trim() : "").filter(Boolean) : [];
+        const headers = Array.from(new Set([...parsedKeys, ...rawHeaders]));
+
         const findMappedKey = (targetKeys: string[]) => {
           return headers.find(h => 
             targetKeys.some(tk => {
@@ -811,14 +1317,14 @@ export const AdminPage: React.FC = () => {
         };
 
         const fieldMapping = {
-          name: findMappedKey(["Назва", "Назва товару", "Повна назва товару", "Name", "Наименование", "Title", "Товар"]),
-          price: findMappedKey(["Ціна", "Ціна (грн)", "Ціна продажу грн", "Price", "Цена", "Cost"]),
-          category: findMappedKey(["Категорія", "Category", "Категория", "Group"]),
+          name: findMappedKey(["Назва", "Назва товару", "Повна назва товару", "Name", "Наименование", "Title", "Товар", "SEO-назва товару", "SEO назва товару"]),
+          price: findMappedKey(["Ціна", "Ціна (грн)", "Ціна продажу, грн", "Ціна продажу грн", "Ціна продажу", "Price", "Цена", "Cost"]),
+          category: findMappedKey(["Категорія", "Category", "Категория", "Group", "Розділ / Категорія", "Розділ/Категорія", "Розділ", "Категорія"]),
           article: findMappedKey(["Артикул", "Оригінал (скорочено)", "Article", "Код", "Sku"]),
-          brand: findMappedKey(["Бренд", "Виробник", "Brand", "Производитель"]),
-          description: findMappedKey(["Опис", "Опис товару (SEO)", "Опис для сайту", "Description", "Описание", "SEO"]),
+          brand: findMappedKey(["Бренд", "Виробник", "Brand", "Производитель", "Країна виробника", "Країна виробник", "Країна"]),
+          description: findMappedKey(["Опис", "Опис товару (SEO)", "Опис для сайту", "Description", "Описание", "SEO", "Опис для сайту"]),
           image: findMappedKey(["Зображення", "Оригінал (посилання)", "Image", "Изображение", "Link", "URL", "Фото"]),
-          type: findMappedKey(["Тип", "Місце на сайті", "Type"]),
+          type: findMappedKey(["Тип", "Місце на сайті", "Місце", "Type"]),
           stock: findMappedKey(["Залишок", "Stock", "Кількість", "Кол-во"])
         };
 
@@ -842,8 +1348,9 @@ export const AdminPage: React.FC = () => {
 
           // Recognition of Category Row (Image 2)
           const isCategoryMarker = name.startsWith('▶') || name.startsWith('►') || name.startsWith('•') || name.startsWith('⁃') || name.startsWith('>');
+          const hasExplicitCategoryColumn = !!fieldMapping.category;
           
-          if (isCategoryMarker || (name && (isNaN(cleanPrice) || cleanPrice <= 0))) {
+          if (isCategoryMarker || (!hasExplicitCategoryColumn && name && (isNaN(cleanPrice) || cleanPrice <= 0))) {
             const potentialCat = name.replace(/^[▶►•⁃>\s]+/, '').trim();
             if (potentialCat.length > 2 && potentialCat.length < 100) {
               currentCategory = potentialCat;
@@ -866,20 +1373,23 @@ export const AdminPage: React.FC = () => {
             const typeStr = typeValue?.toString().toLowerCase() || '';
             const nameLower = name.toLowerCase();
 
-            if (typeStr.includes('сантехніка') || typeStr.includes('plumbing') || nameLower.includes('труба') || nameLower.includes('кран')) {
+            if (typeStr.includes('сантехніка') || typeStr.includes('plumbing') || nameLower.includes('труба') || nameLower.includes('кран') || nameLower.includes('сифон') || nameLower.includes('змішувач')) {
               finalType = 'plumbing';
             } else if (typeStr.includes('авто') || typeStr.includes('auto')) {
               finalType = 'auto';
             }
 
+            // Apply special prefix stripping and dynamic section movement
+            const { cleanName, finalType: resolvedType } = cleanProductNameAndType(name, finalType);
+
             productsToImport.push({
-              name,
+              name: cleanName,
               price: cleanPrice,
-              category: categoryValue?.toString().trim() || currentCategory,
+              category: categoryValue?.toString().trim() || (resolvedType === 'plumbing' && currentCategory === 'Загальне' ? 'Сантехніка' : currentCategory),
               description: descriptionValue?.toString() || (articleValue ? `Артикул: ${articleValue}` : ''),
               image_url: imageValue?.toString() || '',
               stock: Number(stockValue) || 1,
-              type: finalType,
+              type: resolvedType,
               brand: brandValue?.toString() || '',
               article: articleValue?.toString() || ''
             });
@@ -962,13 +1472,9 @@ export const AdminPage: React.FC = () => {
           type: p.type || 'auto'
         }));
 
-        const { data: insertedData, error } = await supabase
+        const { error } = await supabase
           .from('products')
-          .upsert(batchData, { 
-            onConflict: 'name', // Using name as unique identifier to prevent duplicates
-            ignoreDuplicates: false 
-          })
-          .select('id');
+          .insert(batchData);
         
         if (error) {
           console.error(`❌ Batch ERROR at index ${i}:`, error);
@@ -1029,19 +1535,7 @@ export const AdminPage: React.FC = () => {
         const rawData = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as any[][];
         
         // Find a row that looks like a header (contains multiple columns with text)
-        let headerRowIndex = 0;
-        let maxColumnsWithText = 0;
-        
-        // Search first 20 rows for the best header candidate
-        for (let i = 0; i < Math.min(rawData.length, 20); i++) {
-          const row = rawData[i];
-          const textColumnCount = row.filter(cell => cell && cell.toString().trim().length > 1).length;
-          
-          if (textColumnCount >= 3 && textColumnCount > maxColumnsWithText) {
-            maxColumnsWithText = textColumnCount;
-            headerRowIndex = i;
-          }
-        }
+        const headerRowIndex = findHeaderRowIndex(rawData);
 
         const data = XLSX.utils.sheet_to_json(ws, { range: headerRowIndex, defval: "" }) as any[];
         
@@ -1056,7 +1550,7 @@ export const AdminPage: React.FC = () => {
         const mapping = await getColumnMapping(data.slice(0, 10));
         
         if (!mapping || !mapping.name) {
-          alert('AI не вдалося розпізнати структуру файлу. Спробуйте звичайний імпорт.');
+          alert('Системі не вдалося автоматично розпізнати структуру файлу. Спробуйте звичайний імпорт.');
           setIsImporting(false);
           setIsAiMapping(false);
           return;
@@ -1101,8 +1595,9 @@ export const AdminPage: React.FC = () => {
 
         // Recognition of Category Row
         const isCategoryMarker = name.startsWith('▶') || name.startsWith('►') || name.startsWith('•') || name.startsWith('⁃') || name.startsWith('>');
+        const hasExplicitCategoryColumn = !!detectedMapping.category;
         
-        if (isCategoryMarker || (name && (isNaN(cleanPrice) || cleanPrice <= 0))) {
+        if (isCategoryMarker || (!hasExplicitCategoryColumn && name && (isNaN(cleanPrice) || cleanPrice <= 0))) {
           const potentialCat = name.replace(/^[▶►•⁃>\s]+/, '').trim();
           if (potentialCat.length > 2 && potentialCat.length < 100) {
             currentCategory = potentialCat;
@@ -1119,14 +1614,18 @@ export const AdminPage: React.FC = () => {
           const stockVal = p[detectedMapping.stock];
           const imgVal = p[detectedMapping.image];
 
+          let initialType = (currentCategory.toLowerCase().includes('сантехніка') || name.toLowerCase().includes('змішувач') || name.toLowerCase().includes('кран') || name.toLowerCase().includes('труб') || name.toLowerCase().includes('сифон')) ? 'plumbing' : 'auto';
+
+          const { cleanName, finalType: resolvedType } = cleanProductNameAndType(name, initialType);
+
           processedProducts.push({
-            name,
+            name: cleanName,
             price: cleanPrice,
-            category: catVal?.toString().trim() || currentCategory,
+            category: catVal?.toString().trim() || (resolvedType === 'plumbing' && currentCategory === 'Загальне' ? 'Сантехніка' : currentCategory),
             description: descVal?.toString() || (artVal ? `Артикул: ${artVal}` : ''),
             image_url: imgVal?.toString() || '',
             stock: Number(stockVal) || 1,
-            type: (currentCategory.toLowerCase().includes('сантехніка') || name.toLowerCase().includes('змішувач') || name.toLowerCase().includes('кран')) ? 'plumbing' : 'auto',
+            type: resolvedType,
             brand: brandVal?.toString() || '',
             article: artVal?.toString() || ''
           });
@@ -1189,10 +1688,219 @@ export const AdminPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <aside className="w-64 bg-white border-r border-gray-200 p-6 flex flex-col">
-        <div className="text-2xl font-black text-blue-600 mb-12">AdminPanel</div>
+    <div className="min-h-screen bg-gray-50 flex flex-col md:flex-row relative">
+      {/* Mobile Top Header */}
+      <header className="md:hidden flex items-center justify-between bg-white border-b border-gray-200 px-5 py-4 sticky top-0 z-[80]">
+        <div className="flex items-center space-x-3">
+          <button 
+            onClick={() => setIsMobileMenuOpen(true)}
+            className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl transition-all"
+            type="button"
+          >
+            <Menu size={22} />
+          </button>
+          <span className="text-xl font-black text-blue-600 tracking-tight">AdminPanel</span>
+        </div>
+        <div className="flex items-center space-x-2">
+          <span className="flex h-2.5 w-2.5 relative">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+          </span>
+          <span className="text-xs font-bold text-gray-500">Live</span>
+        </div>
+      </header>
+
+      {/* Mobile Sticky Tab Navigation */}
+      <div className="md:hidden sticky top-[69px] z-[79] bg-white border-b border-gray-100 px-4 py-2.5 flex items-center gap-1.5 overflow-x-auto scrollbar-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <button
+          onClick={() => setActiveTab('dashboard')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'dashboard' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <LayoutDashboard size={14} />
+          <span>Дашборд</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('products')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'products' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <Package size={14} />
+          <span>Товари</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('orders')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'orders' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <ShoppingBag size={14} />
+          <span>Замовлення</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('blog')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'blog' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <BookOpen size={14} />
+          <span>Блог</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('content' as any)}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === ('content' as any) ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <Edit size={14} />
+          <span>Контент</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('settings')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'settings' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <Settings size={14} />
+          <span>Налаштування</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('diagnostics')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'diagnostics' ? 'bg-red-600 text-white shadow-sm shadow-red-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <AlertTriangle size={14} />
+          <span>Діагностика</span>
+        </button>
+        <button
+          onClick={() => setActiveTab('chat')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'chat' ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/10' : 'bg-gray-50 text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          <MessageSquare size={14} />
+          <span>Онлайн Чат</span>
+        </button>
+      </div>
+
+      {/* Mobile Sidebar Slider Drawer */}
+      <AnimatePresence>
+        {isMobileMenuOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[140] md:hidden"
+            />
+            {/* Drawer */}
+            <motion.aside
+              initial={{ x: '-100%' }}
+              animate={{ x: 0 }}
+              exit={{ x: '-100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
+              className="fixed inset-y-0 left-0 w-72 bg-white z-[150] p-6 flex flex-col shadow-2xl md:hidden"
+            >
+              <div className="flex items-center justify-between mb-8 pb-4 border-b border-gray-100">
+                <div className="text-2xl font-black text-blue-600">AdminPanel</div>
+                <button 
+                  onClick={() => setIsMobileMenuOpen(false)} 
+                  className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-50 rounded-xl transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              
+              <nav className="space-y-1.5 flex-1 overflow-y-auto">
+                <button 
+                  onClick={() => { setActiveTab('dashboard'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'dashboard' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <LayoutDashboard size={20} />
+                  <span>Дашборд</span>
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('products'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'products' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <Package size={20} />
+                  <span>Товари</span>
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('orders'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'orders' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <ShoppingBag size={20} />
+                  <span>Замовлення</span>
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('blog'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'blog' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <BookOpen size={20} />
+                  <span>Блог</span>
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('content' as any); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === ('content' as any) ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <Edit size={20} />
+                  <span>Контент</span>
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('chat'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'chat' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <MessageSquare size={20} />
+                  <span>Онлайн Чат</span>
+                </button>
+              </nav>
+              
+              <div className="mt-8 space-y-1.5 pt-4 border-t border-gray-100">
+                <button 
+                  onClick={() => { setActiveTab('settings'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'settings' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <Settings size={20} />
+                  <span>Налаштування</span>
+                </button>
+                <button 
+                  onClick={() => { setActiveTab('diagnostics'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'diagnostics' ? 'bg-red-50 text-red-600' : 'text-gray-400 hover:bg-gray-50'
+                  }`}
+                >
+                  <AlertTriangle size={20} />
+                  <span>Діагностика БД</span>
+                </button>
+              </div>
+            </motion.aside>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Desktop Sidebar (Persistent) */}
+      <aside className="hidden md:flex w-64 bg-white border-r border-gray-200 p-6 flex-col shrink-0 min-h-screen sticky top-0 h-screen">
+        <div className="text-2xl font-black text-blue-600 mb-12 tracking-tight">AdminPanel</div>
         <nav className="space-y-2 flex-1">
           <button 
             onClick={() => setActiveTab('dashboard')}
@@ -1239,8 +1947,17 @@ export const AdminPage: React.FC = () => {
             <Edit size={20} />
             <span>Контент</span>
           </button>
+          <button 
+            onClick={() => setActiveTab('chat')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+              activeTab === 'chat' ? 'bg-blue-50 text-blue-600' : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            <MessageSquare size={20} />
+            <span>Онлайн Чат</span>
+          </button>
         </nav>
-        <div className="mt-8 space-y-2">
+        <div className="mt-8 space-y-2 border-t border-gray-150 pt-4">
           <button 
             onClick={() => setActiveTab('settings')}
             className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
@@ -1274,11 +1991,11 @@ export const AdminPage: React.FC = () => {
             >
               <div className="flex items-center gap-3 mb-4 text-purple-600">
                 <Sparkles size={24} />
-                <h3 className="text-xl font-bold">AI розпізнав структуру</h3>
+                <h3 className="text-xl font-bold">Знайдено структуру колонок</h3>
               </div>
               
               <p className="text-gray-600 dark:text-gray-400 mb-6">
-                Перевірте, чи правильно AI визначив колонки:
+                Система автоматично визначила відповідність полів. Перевірте колонки:
               </p>
               
               <div className="space-y-3 mb-8">
@@ -1393,7 +2110,7 @@ export const AdminPage: React.FC = () => {
                   <Sparkles size={32} />
                 </div>
               </div>
-              <h3 className="text-xl font-bold mb-2">AI аналізує файл...</h3>
+              <h3 className="text-xl font-bold mb-2">Авто-аналіз файлу...</h3>
               <p className="text-gray-500 dark:text-gray-400">
                 Зачекайте, ми визначаємо структуру вашої таблиці
               </p>
@@ -1574,7 +2291,7 @@ export const AdminPage: React.FC = () => {
       {/* Edit Product Modal */}
       <AnimatePresence>
         {editingProduct && (
-          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4">
             <motion.div 
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -1583,54 +2300,85 @@ export const AdminPage: React.FC = () => {
               className="absolute inset-0 bg-gray-900/60 backdrop-blur-md"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={{ opacity: 0, scale: 0.95, y: 100 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="relative w-full max-w-5xl bg-white dark:bg-gray-900 rounded-[40px] shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              exit={{ opacity: 0, scale: 0.95, y: 100 }}
+              className="relative w-full h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] bg-white dark:bg-gray-900 rounded-t-[32px] sm:rounded-[40px] shadow-2xl overflow-hidden flex flex-col"
             >
               {/* Header */}
-              <div className="px-10 py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900 sticky top-0 z-10">
-                <div>
-                  <h3 className="text-2xl font-black text-gray-900 dark:text-white">Редагування товару</h3>
-                  <p className="text-sm text-gray-500 font-medium">ID: {editingProduct.id}</p>
+              <div className="px-5 sm:px-10 py-4 sm:py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900 sticky top-0 z-10 shrink-0">
+                <div className="flex items-center space-x-2 sm:space-x-3">
+                  <button 
+                    type="button"
+                    onClick={() => setEditingProduct(null)}
+                    className="sm:hidden p-2 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 active:scale-95 rounded-xl transition-all"
+                  >
+                    <X size={18} />
+                  </button>
+                  <div>
+                    <h3 className="text-base sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight">Редагування</h3>
+                    <p className="text-[10px] sm:text-xs text-gray-400 font-bold mt-0.5 hidden xs:block">ID: {editingProduct.id.toString().substring(0, 12)}...</p>
+                  </div>
                 </div>
-                <button 
-                  onClick={() => setEditingProduct(null)}
-                  className="p-3 bg-gray-100 dark:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-2xl transition-all hover:rotate-90"
-                >
-                  <X size={24} />
-                </button>
+                <div className="flex items-center space-x-2">
+                  <button 
+                    type="submit"
+                    form="edit-product-form"
+                    className="sm:hidden bg-blue-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow-md shadow-blue-600/10 active:scale-95 transition-all animate-none"
+                  >
+                    Оновити
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setEditingProduct(null)}
+                    className="hidden sm:block p-2 sm:p-3 bg-gray-50 dark:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-2xl transition-all hover:rotate-90"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
               </div>
 
-              <form onSubmit={handleUpdateProduct} className="flex-1 overflow-y-auto">
-                <div className="p-10 grid grid-cols-1 lg:grid-cols-12 gap-10">
+              <form id="edit-product-form" onSubmit={handleUpdateProduct} className="flex-1 overflow-y-auto pb-24 sm:pb-0">
+                <div className="p-5 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10">
                   {/* Left Column: Form Fields */}
-                  <div className="lg:col-span-7 space-y-8">
+                  <div className="lg:col-span-7 space-y-6 sm:space-y-8">
                     {/* General Section */}
-                    <div className="space-y-6">
+                    <div className="space-y-4 sm:space-y-6">
                       <div className="flex items-center space-x-2 text-blue-600">
-                        <div className="w-1.5 h-1.5 rounded-full bg-blue-600" />
-                        <span className="text-xs font-black uppercase tracking-widest">Основна інформація</span>
+                        <div className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                        <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest">Основна інформація</span>
                       </div>
                       
                       <div className="space-y-4">
-                        <div className="space-y-2">
-                          <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Назва товару</label>
-                          <input 
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between items-center">
+                            <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Назва товару</label>
+                            {editingProduct.name && (
+                              <button 
+                                type="button" 
+                                onClick={() => setEditingProduct({...editingProduct, name: ''})}
+                                className="text-[10px] text-red-500 hover:text-red-600 font-bold flex items-center gap-0.5 cursor-pointer bg-red-50 dark:bg-red-950/30 px-2 py-0.5 rounded-md"
+                              >
+                                Очистити
+                              </button>
+                            )}
+                          </div>
+                          <textarea 
                             required
+                            rows={3}
                             value={editingProduct.name}
                             onChange={e => setEditingProduct({...editingProduct, name: e.target.value})}
-                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-gray-900 dark:text-white"
+                            className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 sm:px-5 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-semibold text-gray-950 dark:text-white text-xs sm:text-sm resize-none leading-relaxed"
                             placeholder="Введіть назву товару"
                           />
                         </div>
 
-                        <div className="col-span-2 space-y-2">
-                          <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Опис</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Опис товару</label>
                           <textarea 
                             value={editingProduct.description}
                             onChange={e => setEditingProduct({...editingProduct, description: e.target.value})}
-                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all h-40 resize-none font-medium text-gray-900 dark:text-white"
+                            className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 sm:px-5 py-3 sm:py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all h-32 sm:h-40 resize-none font-semibold text-gray-950 dark:text-white text-xs sm:text-sm leading-relaxed"
                             placeholder="Детальний опис товару..."
                           />
                         </div>
@@ -1638,35 +2386,35 @@ export const AdminPage: React.FC = () => {
                     </div>
 
                     {/* Classification Section */}
-                    <div className="space-y-6">
+                    <div className="space-y-4 sm:space-y-6">
                       <div className="flex items-center space-x-2 text-indigo-600">
                         <div className="w-1.5 h-1.5 rounded-full bg-indigo-600" />
-                        <span className="text-xs font-black uppercase tracking-widest">Класифікація та ціна</span>
+                        <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest">Класифікація та ціна</span>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Категорія</label>
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                        <div className="space-y-1.5">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Категорія</label>
                           <input 
                             required
                             value={editingProduct.category}
                             onChange={e => setEditingProduct({...editingProduct, category: e.target.value})}
-                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-gray-900 dark:text-white"
+                            className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-bold text-gray-900 dark:text-white text-xs sm:text-sm"
                           />
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Тип</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Тип товару</label>
                           <select 
                             value={editingProduct.type}
                             onChange={e => setEditingProduct({...editingProduct, type: e.target.value as any})}
-                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-gray-900 dark:text-white appearance-none"
+                            className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-bold text-gray-900 dark:text-white text-xs sm:text-sm appearance-none"
                           >
                             <option value="auto">Автотовари</option>
                             <option value="plumbing">Сантехніка</option>
                           </select>
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Ціна (грн)</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Ціна (грн)</label>
                           <div className="relative">
                             <input 
                               type="number"
@@ -1674,93 +2422,109 @@ export const AdminPage: React.FC = () => {
                               value={editingProduct.price}
                               onFocus={(e) => e.target.select()}
                               onChange={e => setEditingProduct({...editingProduct, price: Number(e.target.value)})}
-                              className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl pl-5 pr-12 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-black text-blue-600 dark:text-blue-400 text-xl"
+                              className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl pl-4 pr-9 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-black text-blue-600 dark:text-blue-400 text-sm sm:text-base"
                             />
-                            <span className="absolute right-5 top-1/2 -translate-y-1/2 font-bold text-gray-400">₴</span>
+                            <span className="absolute right-4 top-1/2 -translate-y-1/2 font-bold text-gray-400 text-xs sm:text-sm">₴</span>
                           </div>
                         </div>
-                        <div className="space-y-2">
-                          <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Склад (шт)</label>
+                        <div className="space-y-1.5">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Склад (шт)</label>
                           <input 
                             type="number"
                             value={editingProduct.stock}
                             onFocus={(e) => e.target.select()}
                             onChange={e => setEditingProduct({...editingProduct, stock: Number(e.target.value)})}
-                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-medium text-gray-900 dark:text-white"
+                            className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-bold text-gray-900 dark:text-white text-xs sm:text-sm"
                           />
                         </div>
                       </div>
                     </div>
 
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-700 dark:text-gray-300">Артикул</label>
+                    <div className="space-y-1.5 col-span-2">
+                      <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Артикул</label>
                       <input 
                         value={editingProduct.article || ''}
                         onChange={e => setEditingProduct({...editingProduct, article: e.target.value})}
-                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-5 py-4 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-mono text-gray-600 dark:text-gray-400"
+                        className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-mono text-gray-600 dark:text-gray-400 text-xs sm:text-sm"
                         placeholder="Наприклад: 123-ABC"
                       />
                     </div>
                   </div>
 
                   {/* Right Column: Media Preview */}
-                  <div className="lg:col-span-5 space-y-6">
+                  <div className="lg:col-span-5 space-y-4 sm:space-y-6">
                     <div className="flex items-center space-x-2 text-emerald-600">
                       <div className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-                      <span className="text-xs font-black uppercase tracking-widest">Зображення товару</span>
+                      <span className="text-[10px] sm:text-xs font-black uppercase tracking-widest">Зображення товару</span>
                     </div>
 
-                    <div className="bg-gray-50 dark:bg-gray-800 rounded-[32px] p-6 border border-gray-100 dark:border-gray-700 space-y-6">
-                      <div className="aspect-square bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-inner flex items-center justify-center border border-gray-200 dark:border-gray-700">
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-3xl p-4 sm:p-6 border border-gray-100 dark:border-gray-700 space-y-4 sm:space-y-6">
+                      <div className="bg-white dark:bg-gray-900 rounded-2xl overflow-hidden shadow-inner border border-gray-200 dark:border-gray-700">
                         {editingProduct.image ? (
-                          <img 
-                            src={editingProduct.image} 
-                            alt="Preview" 
-                            className="w-full h-full object-contain"
-                            referrerPolicy="no-referrer"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400?text=Invalid+URL';
-                            }}
-                          />
+                          <div className="space-y-3 p-3">
+                            <div className="aspect-square bg-gray-50 dark:bg-gray-950 rounded-xl overflow-hidden flex items-center justify-center border border-gray-100 dark:border-gray-800 mb-2">
+                              <img 
+                                src={getFirstImage(editingProduct.image)} 
+                                alt="Preview" 
+                                className="w-full h-full object-contain"
+                                referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'https://via.placeholder.com/400?text=Invalid+URL';
+                                }}
+                              />
+                            </div>
+                            {splitImages(editingProduct.image).length > 1 && (
+                              <div className="flex flex-wrap gap-1.5">
+                                {splitImages(editingProduct.image).map((url, i) => (
+                                  <div key={url} className="w-10 h-10 rounded-lg bg-gray-100 overflow-hidden border border-gray-250 flex-shrink-0">
+                                    <img src={url} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         ) : (
-                          <div className="text-center p-8 space-y-3">
-                            <Upload size={48} className="mx-auto text-gray-300" />
-                            <p className="text-sm text-gray-400 font-medium">Немає зображення</p>
+                          <div className="text-center py-10 px-4 space-y-2">
+                            <Upload size={36} className="mx-auto text-gray-300" />
+                            <p className="text-xs text-gray-400 font-bold">Немає зображення</p>
                           </div>
                         )}
                       </div>
 
-                      <div className="space-y-2">
-                        <label className="text-sm font-bold text-gray-700 dark:text-gray-300">URL зображення</label>
-                        <input 
-                          value={editingProduct.image}
-                          onChange={e => setEditingProduct({...editingProduct, image: e.target.value})}
-                          className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono text-xs text-gray-500"
-                          placeholder="https://example.com/image.jpg"
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Керування фотографіями</label>
+                          <a 
+                            href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(editingProduct.name)}`} 
+                            target="_blank" 
+                            rel="noreferrer"
+                            className="text-[10px] sm:text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-350 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                          >
+                            <Sparkles size={12} className="text-amber-500 animate-pulse" />
+                            <span>Шукати в Google Картинках</span>
+                          </a>
+                        </div>
+                        <MultiImageUploader 
+                          imagesString={editingProduct.image || ''}
+                          onChange={(newVal) => setEditingProduct({...editingProduct, image: newVal})}
                         />
-                      </div>
-
-                      <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-2xl border border-blue-100 dark:border-blue-900/50">
-                        <p className="text-[10px] text-blue-600 dark:text-blue-400 font-bold leading-relaxed uppercase tracking-wider">
-                          Підказка: Використовуйте тільки URL прямих посилань на зображення (JPG, PNG, WEBP).
-                        </p>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 {/* Sticky Footer Buttons */}
-                <div className="px-10 py-6 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800 flex justify-end items-center space-x-6 sticky bottom-0 z-10 backdrop-blur-md">
+                <div className="hidden sm:flex px-5 sm:px-10 py-4 sm:py-5 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-850 flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2 sm:space-x-4 sticky bottom-0 z-10 backdrop-blur-md shrink-0">
                   <button 
                     type="button" 
                     onClick={() => setEditingProduct(null)} 
-                    className="px-8 py-4 font-bold text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    className="px-6 py-2.5 sm:py-4 font-black text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors text-xs sm:text-sm order-2 sm:order-1 text-center bg-gray-100 sm:bg-transparent rounded-xl"
                   >
                     Скасувати
                   </button>
                   <button 
                     type="submit" 
-                    className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all active:scale-95"
+                    className="bg-blue-600 text-white px-8 sm:px-10 py-3 sm:py-4 rounded-xl sm:rounded-2xl font-black shadow-lg shadow-blue-600/10 hover:bg-blue-700 transition-all active:scale-95 text-xs sm:text-sm order-1 sm:order-2"
                   >
                     Оновити товар
                   </button>
@@ -1771,42 +2535,221 @@ export const AdminPage: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Edit Blog Post Modal */}
+      <AnimatePresence>
+        {editingPost && (
+          <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingPost(null)}
+              className="absolute inset-0 bg-gray-900/60 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 100 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 100 }}
+              className="relative w-full h-full sm:h-auto max-h-[100dvh] sm:max-h-[90vh] bg-white dark:bg-gray-900 rounded-t-[32px] sm:rounded-[40px] shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="px-5 sm:px-10 py-4 sm:py-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900 sticky top-0 z-10 shrink-0">
+                <div className="flex items-center space-x-2 sm:space-x-3">
+                  <button 
+                    type="button"
+                    onClick={() => setEditingPost(null)}
+                    className="sm:hidden p-2 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 active:scale-95 rounded-xl transition-all"
+                  >
+                    <X size={18} />
+                  </button>
+                  <div>
+                    <h3 className="text-base sm:text-2xl font-black text-gray-900 dark:text-white tracking-tight">Редагування статті</h3>
+                    <p className="text-[10px] sm:text-xs text-gray-400 font-bold mt-0.5 hidden xs:block">SEO редактор</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button 
+                    type="submit"
+                    form="edit-blog-post-form"
+                    className="sm:hidden bg-purple-600 text-white px-4 py-2 rounded-xl text-xs font-black shadow-md shadow-purple-600/10 active:scale-95 transition-all animate-none"
+                  >
+                    Зберегти
+                  </button>
+                  <button 
+                    type="button"
+                    onClick={() => setEditingPost(null)}
+                    className="hidden sm:block p-2 sm:p-3 bg-gray-50 dark:bg-gray-800 text-gray-400 hover:text-gray-600 dark:hover:text-white rounded-2xl transition-all hover:rotate-90"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              <form id="edit-blog-post-form" onSubmit={handleUpdatePost} className="flex-1 overflow-y-auto pb-24 sm:pb-0">
+                <div className="p-5 sm:p-10 grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-10">
+                  {/* Left Column: Post Data */}
+                  <div className="lg:col-span-8 space-y-6">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between items-center">
+                          <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Заголовок статті</label>
+                          {editingPost.title && (
+                            <button 
+                              type="button" 
+                              onClick={() => setEditingPost({...editingPost, title: ''})}
+                              className="text-[10px] text-red-500 hover:text-red-600 font-bold flex items-center gap-0.5 cursor-pointer bg-red-50 dark:bg-red-950/30 px-2 py-0.5 rounded-md"
+                            >
+                              Очистити
+                            </button>
+                          )}
+                        </div>
+                        <textarea 
+                          required
+                          rows={2}
+                          value={editingPost.title}
+                          onChange={e => setEditingPost({...editingPost, title: e.target.value})}
+                          className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-2.5 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-semibold text-gray-950 dark:text-white text-xs sm:text-sm resize-none leading-relaxed"
+                          placeholder="Назва статті"
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Категорія</label>
+                        <input 
+                          required
+                          value={editingPost.category}
+                          onChange={e => setEditingPost({...editingPost, category: e.target.value})}
+                          className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all font-semibold text-gray-900 dark:text-white text-xs sm:text-sm"
+                          placeholder="Наприклад: Поради, Новини..."
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Короткий опис (Excerpt)</label>
+                      <textarea 
+                        required
+                        value={editingPost.excerpt}
+                        onChange={e => setEditingPost({...editingPost, excerpt: e.target.value})}
+                        className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all h-20 resize-none font-semibold text-gray-900 dark:text-white text-xs sm:text-sm"
+                        placeholder="Короткий анонс для стрічки..."
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="text-xs sm:text-sm font-black text-gray-700 dark:text-gray-300">Контент статті (Markdown)</label>
+                      <textarea 
+                        required
+                        value={editingPost.content}
+                        onChange={e => setEditingPost({...editingPost, content: e.target.value})}
+                        className="w-full bg-gray-50/50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-2xl px-4 py-3 focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-blue-500 transition-all h-64 sm:h-80 font-mono text-xs sm:text-sm leading-relaxed"
+                        placeholder="Введіть повний текст статті з використанням Markdown і стилів..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Right Column: Settings & Image preview */}
+                  <div className="lg:col-span-4 space-y-4">
+                    <div className="bg-gray-50 dark:bg-gray-800 rounded-3xl p-4 sm:p-5 border border-gray-100 dark:border-gray-700 space-y-4">
+                      <div className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Параметри публікації</div>
+                      
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-gray-500">Автор статті</label>
+                        <input 
+                          value={editingPost.author}
+                          onChange={e => setEditingPost({...editingPost, author: e.target.value})}
+                          className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-semibold text-gray-850 dark:text-white"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-gray-500">Час читання</label>
+                        <input 
+                          value={editingPost.readTime}
+                          onChange={e => setEditingPost({...editingPost, readTime: e.target.value})}
+                          className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-xs font-semibold"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-gray-500">URL обкладинки</label>
+                        <input 
+                          value={editingPost.image}
+                          onChange={e => setEditingPost({...editingPost, image: e.target.value})}
+                          className="w-full bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 font-mono text-[10px] text-gray-500"
+                          placeholder="https://..."
+                        />
+                      </div>
+
+                      {editingPost.image && (
+                        <div className="space-y-1.5 pt-2">
+                          <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">Перегляд обкладинки:</label>
+                          <div className="aspect-video rounded-xl overflow-hidden border border-gray-200 bg-gray-200 dark:bg-gray-950">
+                            <img src={editingPost.image} className="w-full h-full object-cover animate-fade-in" referrerPolicy="no-referrer" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sticky Footer Buttons */}
+                <div className="hidden sm:flex px-5 sm:px-10 py-4 sm:py-5 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-850 flex-col sm:flex-row justify-end items-stretch sm:items-center gap-2 sm:space-x-4 sticky bottom-0 z-10 backdrop-blur-md shrink-0">
+                  <button 
+                    type="button" 
+                    onClick={() => setEditingPost(null)} 
+                    className="px-6 py-2.5 sm:py-4 font-black text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors text-xs sm:text-sm order-2 sm:order-1 text-center bg-gray-100 sm:bg-transparent rounded-xl"
+                  >
+                    Скасувати
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="bg-purple-600 text-white px-8 sm:px-10 py-3 sm:py-4 rounded-xl sm:rounded-2xl font-black shadow-lg shadow-purple-600/10 hover:bg-purple-700 transition-all active:scale-95 text-xs sm:text-sm order-1 sm:order-2"
+                  >
+                    Зберегти зміни
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* Main Content */}
-      <main className="flex-1 p-12 overflow-y-auto">
+      <main className="flex-1 p-4 sm:p-6 lg:p-12 overflow-y-auto max-w-full">
         {activeTab === 'dashboard' && (
-          <div className="space-y-12">
-            <div className="flex items-center justify-between">
-              <h1 className="text-4xl font-black text-gray-900">Статистика</h1>
-              <div className="text-sm text-gray-500 font-bold">Оновлено: {new Date().toLocaleTimeString()}</div>
+          <div className="space-y-6 sm:space-y-12">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h1 className="text-2xl sm:text-4xl font-black text-gray-900">Статистика</h1>
+              <div className="text-xs sm:text-sm text-gray-400 sm:text-gray-500 font-bold">Оновлено: {new Date().toLocaleTimeString()}</div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                <div className="text-gray-500 font-bold mb-2">Всього замовлень</div>
-                <div className="text-4xl font-black text-gray-900">{orders.length}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-8">
+              <div className="bg-white p-6 sm:p-8 rounded-[24px] shadow-sm border border-gray-100">
+                <div className="text-xs sm:text-sm text-gray-400 sm:text-gray-500 font-bold mb-2">Всього замовлень</div>
+                <div className="text-2xl sm:text-4xl font-black text-gray-900">{orders.length}</div>
               </div>
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                <div className="text-gray-500 font-bold mb-2">Всього товарів</div>
-                <div className="text-4xl font-black text-gray-900">{totalProductsCount || products.length}</div>
+              <div className="bg-white p-6 sm:p-8 rounded-[24px] shadow-sm border border-gray-100">
+                <div className="text-xs sm:text-sm text-gray-400 sm:text-gray-500 font-bold mb-2">Всього товарів</div>
+                <div className="text-2xl sm:text-4xl font-black text-gray-900">{totalProductsCount || products.length}</div>
               </div>
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                <div className="text-gray-500 font-bold mb-2">Виторг</div>
-                <div className="text-4xl font-black text-blue-600">
+              <div className="bg-white p-6 sm:p-8 rounded-[24px] shadow-sm border border-gray-100">
+                <div className="text-xs sm:text-sm text-gray-400 sm:text-gray-500 font-bold mb-2">Виторг</div>
+                <div className="text-2xl sm:text-4xl font-black text-blue-600">
                   {orders.reduce((sum, o) => sum + o.total_price, 0).toLocaleString()} грн
                 </div>
               </div>
-              <div className="bg-white p-8 rounded-3xl shadow-sm border border-gray-100">
-                <div className="text-gray-500 font-bold mb-2">Низький запас</div>
-                <div className="text-4xl font-black text-red-500">
+              <div className="bg-white p-6 sm:p-8 rounded-[24px] shadow-sm border border-gray-100">
+                <div className="text-xs sm:text-sm text-gray-400 sm:text-gray-500 font-bold mb-2">Низький запас</div>
+                <div className="text-2xl sm:text-4xl font-black text-red-500">
                   {products.filter(p => p.stock < 5).length}
                 </div>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-              <div className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm">
-                <h3 className="text-xl font-black mb-8">Динаміка продажів (7 днів)</h3>
-                <div className="h-[300px] w-full">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 lg:gap-8">
+              <div className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-gray-100 shadow-sm">
+                <h3 className="text-lg sm:text-xl font-black mb-6 sm:mb-8">Динаміка продажів (7 днів)</h3>
+                <div className="h-[260px] sm:h-[300px] w-full">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={getChartData()}>
                       <defs>
@@ -1816,11 +2759,11 @@ export const AdminPage: React.FC = () => {
                         </linearGradient>
                       </defs>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
-                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 12}} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
+                      <YAxis axisLine={false} tickLine={false} tick={{fill: '#94a3b8', fontSize: 11}} />
                       <Tooltip 
                         contentStyle={{borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)'}}
-                        itemStyle={{fontWeight: 'bold'}}
+                        itemStyle={{fontWeight: 'bold', fontSize: 12}}
                       />
                       <Area type="monotone" dataKey="sales" stroke="#2563eb" strokeWidth={3} fillOpacity={1} fill="url(#colorSales)" />
                     </AreaChart>
@@ -1828,18 +2771,18 @@ export const AdminPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="bg-white p-8 rounded-[32px] border border-gray-100 shadow-sm">
-                <h3 className="text-xl font-black mb-8">Товари з низьким запасом</h3>
-                <div className="space-y-4">
+              <div className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-gray-100 shadow-sm">
+                <h3 className="text-lg sm:text-xl font-black mb-6 sm:mb-8">Товари з низьким запасом</h3>
+                <div className="space-y-3 sm:space-y-4">
                   {products.filter(p => p.stock < 5).slice(0, 5).map(p => (
-                    <div key={p.id} className="flex items-center justify-between p-4 bg-red-50 rounded-2xl">
-                      <div className="flex items-center space-x-3">
-                        <div className="w-10 h-10 bg-white rounded-lg overflow-hidden border border-red-100">
-                          <img src={p.image || `https://picsum.photos/seed/${p.id}/100/100`} className="w-full h-full object-cover" />
+                    <div key={p.id} className="flex items-center justify-between p-3 sm:p-4 bg-red-50 rounded-2xl gap-2">
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <div className="w-10 h-10 bg-white rounded-lg overflow-hidden border border-red-100 flex-shrink-0">
+                          <img src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/100/100`} className="w-full h-full object-cover" />
                         </div>
-                        <span className="font-bold text-gray-900">{p.name}</span>
-                      </div>
-                      <div className="text-red-600 font-black">Залишок: {p.stock}</div>
+                        <span className="font-bold text-gray-900 text-sm truncate">{p.name}</span>
+                       </div>
+                      <div className="text-red-600 font-black text-xs sm:text-sm flex-shrink-0">Залишок: {p.stock}</div>
                     </div>
                   ))}
                   {products.filter(p => p.stock < 5).length === 0 && (
@@ -1852,99 +2795,453 @@ export const AdminPage: React.FC = () => {
         )}
 
         {activeTab === 'products' && (
-          <div className="space-y-8">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <h1 className="text-4xl font-black text-gray-900">Управління товарами</h1>
-              <div className="flex flex-wrap gap-4">
+          <div className="space-y-6">
+            <div className="bg-white p-4 sm:p-6 rounded-[24px] border border-gray-200 shadow-sm space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2">
+                    <span>Управління товарами</span>
+                    <span className="text-xs font-black bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">{products.length} шт</span>
+                  </h1>
+                  <p className="text-xs text-gray-400 mt-1 font-semibold">Додавайте, редагуйте та керуйте товарами наживо</p>
+                </div>
+                
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => setIsAddingProduct(true)}
+                    className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all text-xs sm:text-sm shadow-md shadow-blue-600/10 active:scale-95"
+                  >
+                    <Plus size={16} />
+                    <span>Додати товар</span>
+                  </button>
+                  
+                  <button 
+                    onClick={() => setShowDbOps(!showDbOps)}
+                    className={`flex items-center justify-center space-x-1.5 px-4 py-2.5 rounded-xl text-xs font-black border transition-all ${
+                      showDbOps 
+                        ? 'bg-purple-50 text-purple-700 border-purple-200 shadow-sm' 
+                        : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                    }`}
+                  >
+                    <Settings size={14} className={showDbOps ? 'animate-spin' : ''} />
+                    <span>Інструменти</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Search & Refresh Row */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <input 
+                    type="text"
+                    placeholder="Пошук за назвою або артикулом..."
+                    value={productSearch}
+                    onChange={(e) => setProductSearch(e.target.value)}
+                    className="pl-9 pr-4 py-2.5 bg-gray-50/50 hover:bg-gray-50 border border-gray-200 focus:bg-white rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-full text-xs sm:text-sm font-semibold transition-all placeholder:text-gray-400"
+                  />
+                  <Package className="absolute left-3 top-3 text-gray-400" size={16} />
+                </div>
+                
                 <button 
                   onClick={refreshAllData}
                   disabled={isRefreshing}
-                  className="p-3 bg-gray-100 text-gray-600 rounded-xl hover:bg-gray-200 transition-all flex items-center space-x-2"
+                  className="p-2.5 bg-gray-100 text-gray-600 hover:bg-gray-200 border border-gray-200 rounded-xl transition-all shrink-0"
                   title="Оновити дані"
                 >
-                  <RotateCw className={isRefreshing ? 'animate-spin' : ''} size={18} />
-                  <span className="font-bold">Оновити</span>
-                </button>
-                <div className="relative">
-                  <input 
-                    type="text"
-                    placeholder="Пошук товарів..."
-                    value={productSearch}
-                    onChange={(e) => setProductSearch(e.target.value)}
-                    className="pl-10 pr-4 py-3 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 w-64"
-                  />
-                  <Package className="absolute left-3 top-3.5 text-gray-400" size={18} />
-                </div>
-                {selectedProducts.length > 0 && (
-                  <button 
-                    onClick={handleBulkDelete}
-                    className="flex items-center space-x-2 bg-red-50 text-red-600 px-6 py-3 rounded-xl font-bold hover:bg-red-100 transition-all"
-                  >
-                    <Trash2 size={18} />
-                    <span>Видалити ({selectedProducts.length})</span>
-                  </button>
-                )}
-                <label className={`flex items-center space-x-2 bg-white border border-gray-200 px-6 py-3 rounded-xl font-bold cursor-pointer hover:bg-gray-50 transition-all ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                  <Upload size={18} className={isImporting ? 'animate-bounce' : ''} />
-                  <span>{isImporting ? `Імпорт ${importProgress}%` : 'Імпорт XLSX'}</span>
-                  <input type="file" accept=".xlsx, .xls, .csv" onChange={handleImportExcel} className="hidden" disabled={isImporting} />
-                </label>
-                <button 
-                  onClick={handleDownloadTemplate}
-                  className="flex items-center space-x-2 bg-white border border-gray-200 px-6 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all text-gray-600"
-                >
-                  <Download size={18} />
-                  <span>Шаблон XLSX</span>
-                </button>
-                <label className={`flex items-center space-x-2 bg-purple-50 text-purple-600 border border-purple-100 px-6 py-3 rounded-xl font-bold cursor-pointer hover:bg-purple-100 transition-all ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
-                  <Sparkles size={18} className={isAiMapping ? 'animate-pulse' : ''} />
-                  <span>Розумний імпорт (AI)</span>
-                  <input 
-                    type="file" 
-                    className="hidden" 
-                    accept=".xlsx,.xls,.csv"
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleSmartImport(file);
-                    }}
-                    disabled={isImporting}
-                  />
-                </label>
-        <button 
-          onClick={async () => {
-            try {
-              const { count } = await supabase
-                .from('products')
-                .select('*', { count: 'exact', head: true });
-              if (count !== null) setTotalProductsCount(count);
-            } catch (e) {}
-            setIsConfirmingDeleteAll(true);
-          }}
-          className="flex items-center space-x-2 bg-red-50 text-red-600 px-6 py-3 rounded-xl font-bold hover:bg-red-100 transition-all"
-        >
-          <Trash2 size={18} />
-          <span>Видалити все</span>
-        </button>
-                <button 
-                  onClick={() => setIsAddingProduct(true)}
-                  className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all"
-                >
-                  <Plus size={18} />
-                  <span>Додати товар</span>
+                  <RotateCw className={isRefreshing ? 'animate-spin' : ''} size={16} />
                 </button>
               </div>
+
+              {/* Plumbing prefix fix alert banner */}
+              {products.some(p => p.name.trim().toLowerCase().startsWith('сантехніка') && p.name.trim().length > 10) && (
+                <div className="bg-amber-50/80 border border-amber-200/60 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-slide-in">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="text-amber-600 shrink-0 mt-0.5" size={18} />
+                    <div className="space-y-1">
+                      <h4 className="text-xs font-black text-amber-900 leading-tight uppercase tracking-wider">Знайдено товари з префіксом "Сантехніка —"</h4>
+                      <p className="text-[11px] text-amber-700/80 font-bold leading-relaxed">
+                        Виявлено товари з префіксами типу "Сантехніка —" у назві та неправильним розділом "АВТО". 
+                        Бажаєте автоматично прибрати ці префікси та перемістити товари до розділу "Сантехніка"?
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleFixPlumbingPrefixes}
+                    disabled={isFixingPlumbing}
+                    className="w-full sm:w-auto bg-amber-600 hover:bg-amber-700 disabled:bg-amber-400 text-white rounded-xl px-4 py-2 text-xs font-extrabold shadow-md shadow-amber-600/10 active:scale-95 transition-all flex items-center justify-center gap-1.5 shrink-0 self-end sm:self-auto cursor-pointer"
+                  >
+                    {isFixingPlumbing ? (
+                      <>
+                        <RotateCw className="animate-spin text-white" size={12} />
+                        <span>Виправлення...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 size={12} className="text-white" />
+                        <span>Виправити автоматично ({products.filter(p => p.name.trim().toLowerCase().startsWith('сантехніка') && p.name.trim().length > 10).length} шт)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Tractor prefix fix alert banner */}
+              {products.some(p => {
+                const { cleanName } = cleanProductNameAndType(p.name, p.type);
+                return cleanName !== p.name.trim();
+              }) && (
+                <div className="bg-blue-50/80 border border-blue-200/60 p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 animate-slide-in">
+                  <div className="flex items-start gap-3">
+                    <Sparkles className="text-blue-600 shrink-0 mt-0.5 animate-pulse" size={18} />
+                    <div className="space-y-1">
+                      <h4 className="text-xs font-black text-blue-900 leading-tight uppercase tracking-wider">Знайдено товари з префіксом тракторних деталей</h4>
+                      <p className="text-[11px] text-blue-700/80 font-bold leading-relaxed">
+                        Виявлено товари з зайвими фразами типу "Запчастина для трактора МТЗ ЮМЗ: ", "МТЗ/ЮМЗ —" у назвах.
+                        Приберіть ці довгі префікси, щоб назва товару виглядала чистою і красивою для покупців!
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleFixTractorPrefixes}
+                    disabled={isFixingTractor}
+                    className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-xl px-4 py-2 text-xs font-extrabold shadow-md shadow-blue-600/10 active:scale-95 transition-all flex items-center justify-center gap-1.5 shrink-0 self-end sm:self-auto cursor-pointer"
+                  >
+                    {isFixingTractor ? (
+                      <>
+                        <RotateCw className="animate-spin text-white" size={12} />
+                        <span>Виправлення...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Wand2 size={12} className="text-white" />
+                        <span>Очистити префікси ({products.filter(p => {
+                          const { cleanName } = cleanProductNameAndType(p.name, p.type);
+                          return cleanName !== p.name.trim();
+                        }).length} шт)</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              )}
+
+              {/* Advanced database operations - Collapsible */}
+              <AnimatePresence>
+                {showDbOps && (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden border-t border-gray-100 pt-4"
+                  >
+                    <div className="bg-purple-50/20 border border-purple-100/30 p-4 rounded-2xl space-y-3">
+                      <div className="text-xs font-black text-purple-700 uppercase tracking-wider mb-1">Імпорт, Експорт та Керування Базою Даних:</div>
+                      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+                        <label className={`flex items-center justify-center space-x-2 bg-white border border-gray-200 px-3 py-2.5 rounded-xl text-xs font-bold cursor-pointer hover:bg-gray-50 transition-all ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                          <Upload size={14} className={isImporting ? 'animate-bounce' : ''} />
+                          <span>{isImporting ? `Імпорт ${importProgress}%` : 'Імпорт XLSX'}</span>
+                          <input type="file" accept=".xlsx, .xls, .csv" onChange={handleImportExcel} className="hidden" disabled={isImporting} />
+                        </label>
+
+                        <button 
+                          onClick={handleDownloadTemplate}
+                          type="button"
+                          className="flex items-center justify-center space-x-2 bg-white border border-gray-200 px-3 py-2.5 rounded-xl text-xs font-bold hover:bg-gray-50 transition-all text-gray-600"
+                        >
+                          <Download size={14} />
+                          <span>Шаблон XLSX</span>
+                        </button>
+
+                        <button 
+                          onClick={() => handleExportProducts()}
+                          type="button"
+                          className="flex items-center justify-center space-x-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-100/50 text-emerald-700 px-3 py-2.5 rounded-xl text-xs font-bold transition-all"
+                        >
+                          <Download size={14} />
+                          <span>Експорт в Excel</span>
+                        </button>
+
+                        <label className={`flex items-center justify-center space-x-2 bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-100 px-3 py-2.5 rounded-xl text-xs font-bold cursor-pointer transition-all ${isImporting ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                          <Sparkles size={14} className={isAiMapping ? 'animate-pulse' : ''} />
+                          <span>Смарт Імпорт</span>
+                          <input 
+                            type="file" 
+                            className="hidden" 
+                            accept=".xlsx,.xls,.csv"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (file) handleSmartImport(file);
+                            }}
+                            disabled={isImporting}
+                          />
+                        </label>
+
+                        <button 
+                          onClick={async () => {
+                            try {
+                              const { count } = await supabase
+                                .from('products')
+                                .select('*', { count: 'exact', head: true });
+                              if (count !== null) setTotalProductsCount(count);
+                            } catch (e) {}
+                              setIsConfirmingDeleteAll(true);
+                          }}
+                          type="button"
+                          className="flex items-center justify-center space-x-2 bg-red-50 hover:bg-red-100 text-red-600 border border-red-100 px-3 py-2.5 rounded-xl text-xs font-semibold sm:font-bold transition-all"
+                        >
+                          <Trash2 size={14} />
+                          <span>Видалити все</span>
+                        </button>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* Selected items tools */}
+              {selectedProducts.length > 0 && (
+                <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between bg-blue-50/40 border border-blue-100 p-3 rounded-xl animate-slide-in">
+                  <span className="text-xs font-bold text-blue-700">Вибрано товарів: <span className="font-extrabold">{selectedProducts.length}</span></span>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button 
+                      onClick={() => {
+                        const targetList = products.filter(p => selectedProducts.includes(p.id));
+                        handleExportProducts(targetList);
+                      }}
+                      className="flex-1 sm:flex-none flex items-center justify-center space-x-1.5 bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg text-xs font-black transition-all shadow-md shadow-emerald-600/10 active:scale-95 cursor-pointer"
+                    >
+                      <Download size={12} />
+                      <span>Скачати в Excel ({selectedProducts.length} шт)</span>
+                    </button>
+                    <button 
+                      onClick={handleBulkDelete}
+                      className="flex-1 sm:flex-none flex items-center justify-center space-x-1 bg-red-50 hover:bg-red-100 hover:text-red-700 text-red-600 px-3 py-1.5 rounded-lg text-xs font-black transition-all"
+                    >
+                      <Trash2 size={12} />
+                      <span>Видалити ({selectedProducts.length})</span>
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {isAddingProduct && (
-              <div className="bg-white p-8 rounded-3xl border border-blue-100 shadow-xl shadow-blue-600/5">
-                <form onSubmit={handleAddProduct} className="grid grid-cols-2 gap-6">
+              <div className="bg-white p-8 rounded-3xl border border-blue-100 shadow-xl shadow-blue-600/5 space-y-8">
+                {/* AUTOFILL / CLONE SECTION */}
+                <div className="bg-gradient-to-tr from-blue-50/70 to-indigo-50/40 p-6 rounded-2xl border border-blue-100 space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center space-x-2 text-blue-700">
+                      <Sparkles size={18} className="text-blue-600 animate-pulse" />
+                      <h3 className="text-xs font-black uppercase tracking-wider">Швидке клонування / Автозаповнення</h3>
+                    </div>
+                    {clonedFromProductName && (
+                      <span className="text-[10px] bg-emerald-600 text-white font-bold py-1 px-3 rounded-full flex items-center gap-1">
+                        ✓ Скопійовано з: <b className="font-extrabold">{clonedFromProductName}</b>
+                      </span>
+                    )}
+                  </div>
+                  
+                  <p className="text-xs text-gray-500 font-medium">
+                    Ви можете вибрати будь-який існуючий або нещодавно відредагований товар як шаблон, щоб миттєво заповнити форму новими даними.
+                  </p>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Search Field */}
+                    <div className="relative">
+                      <input 
+                        type="text"
+                        placeholder="Пошук серед усіх товарів для копіювання..."
+                        value={templateSearchText}
+                        onChange={(e) => setTemplateSearchText(e.target.value)}
+                        className="w-full pl-9 pr-8 py-2.5 bg-white border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-xs text-gray-800"
+                      />
+                      <Package className="absolute left-3 top-3 text-gray-400" size={14} />
+                      {templateSearchText && (
+                        <button 
+                          type="button" 
+                          onClick={() => setTemplateSearchText('')}
+                          className="absolute right-3 top-3 text-gray-400 hover:text-gray-600 font-bold text-xs"
+                        >
+                          ✕
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick reset templates */}
+                    <div className="flex gap-2 items-center md:justify-end text-xs">
+                      {clonedFromProductName && (
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            setNewProduct({ name: '', price: 0, category: '', description: '', image: '', stock: 1, type: 'auto', brand: '', article: '', specs: '' });
+                            setClonedFromProductName(null);
+                          }} 
+                          className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg transition-all"
+                        >
+                          Очистити форму
+                        </button>
+                      )}
+                      <button 
+                        type="button" 
+                        onClick={() => setTemplateSearchText('')} 
+                        disabled={!templateSearchText}
+                        className="px-3 py-2 bg-white hover:bg-gray-50 border border-gray-200 rounded-lg font-bold text-gray-600 text-[11px] disabled:opacity-50"
+                      >
+                        Скинути пошук
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Suggestion lists container */}
+                  <div className="space-y-4">
+                    {/* 1. Recently edited list */}
+                    {editedProductIds.length > 0 && (
+                      <div>
+                        <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1.5 flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-ping" /> Нещодавно відредаговані товари:
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {products
+                            .filter(p => editedProductIds.includes(p.id))
+                            .filter(p => !templateSearchText || p.name.toLowerCase().includes(templateSearchText.toLowerCase()) || p.article?.toLowerCase().includes(templateSearchText.toLowerCase()))
+                            .map(p => (
+                              <button
+                                key={`edit-tmpl-${p.id}`}
+                                type="button"
+                                onClick={() => {
+                                  setNewProduct({
+                                    name: p.name,
+                                    price: p.price,
+                                    category: p.category,
+                                    description: p.description || '',
+                                    image: p.image || p.image_url || '',
+                                    stock: p.stock || 1,
+                                    type: p.type || 'auto',
+                                    brand: p.brand || '',
+                                    article: p.article || '',
+                                    specs: typeof p.specs === 'object' ? JSON.stringify(p.specs) : (p.specs || '')
+                                  });
+                                  setClonedFromProductName(p.name);
+                                }}
+                                className="flex items-center space-x-2 bg-white hover:bg-blue-50 border border-blue-200 hover:border-blue-400 p-2 rounded-xl transition-all shadow-sm max-w-[260px] text-left"
+                              >
+                                <div className="w-6 h-6 rounded bg-gray-50 overflow-hidden flex-shrink-0">
+                                  <img src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/50/50`} className="w-full h-full object-cover" />
+                                </div>
+                                <div className="min-w-0 flex-1">
+                                  <div className="font-bold text-[10px] text-gray-800 truncate leading-tight">{p.name}</div>
+                                  <div className="text-[8px] text-blue-600 font-black truncate">{p.price} грн • {p.brand || 'без бренду'}</div>
+                                </div>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 2. Search / Filtered items */}
+                    {templateSearchText ? (
+                      <div className="border-t border-gray-100 pt-3">
+                        <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Результати пошуку товарів-шаблонів:</div>
+                        {products.filter(p => p.name.toLowerCase().includes(templateSearchText.toLowerCase()) || p.article?.toLowerCase().includes(templateSearchText.toLowerCase())).length === 0 ? (
+                          <div className="text-[10px] text-gray-400 font-bold py-1">Товарів не знайдено за вашим запитом.</div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 max-h-40 overflow-y-auto pr-1">
+                            {products
+                              .filter(p => p.name.toLowerCase().includes(templateSearchText.toLowerCase()) || p.article?.toLowerCase().includes(templateSearchText.toLowerCase()))
+                              .slice(0, 15)
+                              .map(p => (
+                                <button
+                                  key={`search-tmpl-${p.id}`}
+                                  type="button"
+                                  onClick={() => {
+                                    setNewProduct({
+                                      name: p.name,
+                                      price: p.price,
+                                      category: p.category,
+                                      description: p.description || '',
+                                      image: p.image || p.image_url || '',
+                                      stock: p.stock || 1,
+                                      type: p.type || 'auto',
+                                      brand: p.brand || '',
+                                      article: p.article || '',
+                                      specs: typeof p.specs === 'object' ? JSON.stringify(p.specs) : (p.specs || '')
+                                    });
+                                    setClonedFromProductName(p.name);
+                                  }}
+                                  className="flex items-center space-x-2 bg-white hover:bg-blue-50 border border-gray-100 hover:border-blue-300 p-2 rounded-xl transition-all text-left shadow-sm min-w-0"
+                                >
+                                  <div className="w-7 h-7 rounded bg-gray-50 overflow-hidden flex-shrink-0">
+                                    <img src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/50/50`} className="w-full h-full object-cover" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="font-bold text-[10px] text-gray-800 truncate leading-none">{p.name}</div>
+                                    <div className="text-[8px] text-gray-400 font-mono truncate mt-0.5">{p.article || 'немає арт.'} • {p.price} грн</div>
+                                  </div>
+                                </button>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* 3. Predefined default lists (ті які там зараз) */
+                      <div>
+                        <div className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1.5">Поточні товари (ті, які там зараз є):</div>
+                        <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto pr-1">
+                          {products
+                            .slice(0, 6)
+                            .map(p => (
+                              <button
+                                key={`curr-tmpl-${p.id}`}
+                                type="button"
+                                onClick={() => {
+                                  setNewProduct({
+                                    name: p.name,
+                                    price: p.price,
+                                    category: p.category,
+                                    description: p.description || '',
+                                    image: p.image || p.image_url || '',
+                                    stock: p.stock || 1,
+                                    type: p.type || 'auto',
+                                    brand: p.brand || '',
+                                    article: p.article || '',
+                                    specs: typeof p.specs === 'object' ? JSON.stringify(p.specs) : (p.specs || '')
+                                  });
+                                  setClonedFromProductName(p.name);
+                                }}
+                                className="flex items-center space-x-1.5 bg-white hover:bg-blue-50 border border-gray-200 hover:border-blue-300 py-1.5 px-3 rounded-full transition-all text-left shadow-sm text-[11px] font-bold text-gray-700"
+                              >
+                                <span className="opacity-75">📦</span> 
+                                <span className="truncate max-w-[150px]">{p.name}</span>
+                                <span className="text-[9px] text-blue-600">({p.price}₴)</span>
+                              </button>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* PRODUCT ACTION FORM */}
+                <form onSubmit={handleAddProduct} className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                   <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-600">Назва</label>
-                    <input 
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-bold text-gray-600">Назва</label>
+                      {newProduct.name && (
+                        <button 
+                          type="button" 
+                          onClick={() => setNewProduct({...newProduct, name: ''})}
+                          className="text-[10px] text-red-500 hover:text-red-600 font-bold flex items-center gap-0.5 cursor-pointer bg-red-50 dark:bg-red-950/30 px-2 py-0.5 rounded-md"
+                        >
+                          Очистити
+                        </button>
+                      )}
+                    </div>
+                    <textarea 
                       required
+                      rows={2}
                       value={newProduct.name}
                       onChange={e => setNewProduct({...newProduct, name: e.target.value})}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-blue-500/20 resize-none leading-relaxed text-sm"
+                      placeholder="Введіть повну назву товару..."
                     />
                   </div>
                   <div className="space-y-2">
@@ -1955,7 +3252,7 @@ export const AdminPage: React.FC = () => {
                       value={newProduct.price}
                       onFocus={(e) => e.target.select()}
                       onChange={e => setNewProduct({...newProduct, price: Number(e.target.value)})}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-black"
                     />
                   </div>
                   <div className="space-y-2">
@@ -1972,13 +3269,33 @@ export const AdminPage: React.FC = () => {
                     <select 
                       value={newProduct.type}
                       onChange={e => setNewProduct({...newProduct, type: e.target.value as any})}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-bold"
                     >
                       <option value="auto">Автотовари</option>
                       <option value="plumbing">Сантехніка</option>
                     </select>
                   </div>
-                  <div className="col-span-2 space-y-2">
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-gray-600">Бренд / Виробник</label>
+                    <input 
+                      value={newProduct.brand}
+                      onChange={e => setNewProduct({...newProduct, brand: e.target.value})}
+                      placeholder="Наприклад: Bosch, Grohe, ..."
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-bold text-gray-600">Артикул</label>
+                    <input 
+                      value={newProduct.article}
+                      onChange={e => setNewProduct({...newProduct, article: e.target.value})}
+                      placeholder="Наприклад: 123-ABC"
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-mono text-xs"
+                    />
+                  </div>
+
+                  <div className="col-span-1 sm:col-span-2 space-y-2">
                     <label className="text-sm font-bold text-gray-600">Опис</label>
                     <textarea 
                       value={newProduct.description}
@@ -1996,96 +3313,199 @@ export const AdminPage: React.FC = () => {
                       className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                     />
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-600">URL зображення</label>
+                    <label className="text-sm font-bold text-gray-600">Технічні характеристики (JSON формат)</label>
                     <input 
-                      value={newProduct.image}
-                      onChange={e => setNewProduct({...newProduct, image: e.target.value})}
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                      value={newProduct.specs}
+                      onChange={e => setNewProduct({...newProduct, specs: e.target.value})}
+                      placeholder='Наприклад: {"Матеріал": "Сталь", "Довжина": "10м"}'
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500/20 font-mono text-xs"
                     />
                   </div>
-                  <div className="col-span-2 flex justify-end space-x-4">
-                    <button type="button" onClick={() => setIsAddingProduct(false)} className="px-6 py-3 font-bold text-gray-500 hover:text-gray-700">Скасувати</button>
-                    <button type="submit" className="bg-blue-600 text-white px-8 py-3 rounded-xl font-bold hover:bg-blue-700">Зберегти</button>
+
+                  <div className="col-span-1 sm:col-span-2 space-y-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-sm font-bold text-gray-600">Керування фотографіями</label>
+                      <a 
+                        href={`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(newProduct.name || 'змішувач автозапчастини')}`} 
+                        target="_blank" 
+                        rel="noreferrer"
+                        className="text-[10px] sm:text-xs text-blue-600 hover:text-blue-700 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                      >
+                        <Sparkles size={12} className="text-amber-500 animate-pulse" />
+                        <span>Шукати в Google Картинках</span>
+                      </a>
+                    </div>
+                    <MultiImageUploader 
+                      imagesString={newProduct.image || ''}
+                      onChange={(newVal) => setNewProduct({...newProduct, image: newVal})}
+                    />
+                  </div>
+                  <div className="col-span-1 sm:col-span-2 flex justify-end space-x-2 sm:space-x-4">
+                    <button type="button" onClick={() => setIsAddingProduct(false)} className="px-4 sm:px-6 py-2.5 sm:py-3 font-bold text-gray-500 hover:text-gray-700 text-sm">Скасувати</button>
+                    <button type="submit" className="bg-blue-600 text-white px-5 sm:px-8 py-2.5 sm:py-3 rounded-xl font-bold hover:bg-blue-700 text-sm">Зберегти товар</button>
                   </div>
                 </form>
               </div>
             )}
 
             <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-4 w-12">
-                      <button 
-                        onClick={() => {
-                          if (selectedProducts.length === products.length) setSelectedProducts([]);
-                          else setSelectedProducts(products.map(p => p.id));
-                        }}
-                        className="text-gray-400 hover:text-blue-600"
-                      >
-                        {selectedProducts.length === products.length ? <CheckSquare size={20} /> : <Square size={20} />}
-                      </button>
-                    </th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Товар</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Тип</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Категорія</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Ціна</th>
-                    <th className="px-6 py-4 font-bold text-gray-600 text-right">Дії</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {products
-                    .filter(p => 
-                      p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
-                      p.article?.toLowerCase().includes(productSearch.toLowerCase())
-                    )
-                    .slice(0, visibleProductsCount)
-                    .map(p => (
-                    <tr key={p.id} className={`hover:bg-gray-50/50 transition-colors ${selectedProducts.includes(p.id) ? 'bg-blue-50/30' : ''}`}>
-                      <td className="px-6 py-4">
+              {/* Mobile View: Cards Layout */}
+              <div className="block md:hidden divide-y divide-gray-100">
+                {products
+                  .filter(p => 
+                    p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+                    p.article?.toLowerCase().includes(productSearch.toLowerCase()) ||
+                    p.brand?.toLowerCase().includes(productSearch.toLowerCase())
+                  )
+                  .slice(0, visibleProductsCount)
+                  .map(p => (
+                    <div 
+                      key={p.id} 
+                      className={`p-4 space-y-3 transition-colors ${selectedProducts.includes(p.id) ? 'bg-blue-50/20' : ''}`}
+                    >
+                      <div className="flex items-start gap-3">
                         <button 
                           onClick={() => {
                             if (selectedProducts.includes(p.id)) setSelectedProducts(selectedProducts.filter(id => id !== p.id));
                             else setSelectedProducts([...selectedProducts, p.id]);
                           }}
-                          className={`${selectedProducts.includes(p.id) ? 'text-blue-600' : 'text-gray-300 hover:text-gray-400'}`}
+                          className={`mt-1 h-5 w-5 rounded border flex items-center justify-center shrink-0 transition-colors ${
+                            selectedProducts.includes(p.id) ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 text-transparent'
+                          }`}
                         >
-                          {selectedProducts.includes(p.id) ? <CheckSquare size={20} /> : <Square size={20} />}
+                          <CheckSquare size={14} className="stroke-[3]" />
                         </button>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden">
-                            <img src={p.image || `https://picsum.photos/seed/${p.id}/100/100`} className="w-full h-full object-cover" />
-                          </div>
+                        
+                        <div className="w-12 h-12 bg-gray-50 rounded-lg overflow-hidden shrink-0 border border-gray-100">
+                          <img 
+                            src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/100/100`} 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                        
+                        <div className="flex-1 min-w-0">
                           <a 
                             href={`/product/${p.id}`} 
                             target="_blank" 
                             rel="noopener noreferrer"
-                            className="font-bold text-gray-900 hover:text-blue-600 transition-colors"
+                            className="text-sm font-black text-gray-950 hover:text-blue-600 break-words line-clamp-2"
                           >
                             {p.name}
                           </a>
+                          <div className="flex flex-wrap items-center gap-2 mt-1">
+                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider ${
+                              p.type === 'auto' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'
+                            }`}>
+                              {p.type === 'auto' ? 'Авто' : 'Сантех'}
+                            </span>
+                            <span className="text-[10px] text-gray-500 font-extrabold bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">{p.category}</span>
+                            {p.article && (
+                              <span className="text-[10px] font-mono text-gray-400 bg-gray-50 px-1 py-0.5 rounded">Арт: {p.article}</span>
+                            )}
+                          </div>
                         </div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${p.type === 'auto' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'}`}>
-                          {p.type === 'auto' ? 'Авто' : 'Сантех'}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-gray-600">{p.category}</td>
-                      <td className="px-6 py-4 font-bold text-gray-900">{p.price} грн</td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end space-x-2">
-                          <button onClick={() => setEditingProduct(p)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors"><Edit size={18} /></button>
-                          <button onClick={() => handleDeleteProduct(p)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                      </div>
+                      
+                      <div className="flex items-center justify-between pt-2 border-t border-gray-50 bg-gray-50/40 px-2 py-1.5 rounded-xl">
+                        <div className="text-sm font-black text-gray-900">{p.price} грн</div>
+                        <div className="flex items-center space-x-1">
+                          <button 
+                            onClick={() => setEditingProduct(p)} 
+                            className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-100"
+                          >
+                            <Edit size={16} />
+                          </button>
+                          <button 
+                            onClick={() => handleDeleteProduct(p)} 
+                            className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-100"
+                          >
+                            <Trash2 size={16} />
+                          </button>
                         </div>
-                      </td>
-                    </tr>
+                      </div>
+                    </div>
                   ))}
-                </tbody>
-              </table>
+              </div>
+
+              {/* Desktop View: Classical Table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left min-w-[800px]">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-4 w-12">
+                        <button 
+                          onClick={() => {
+                            if (selectedProducts.length === products.length) setSelectedProducts([]);
+                            else setSelectedProducts(products.map(p => p.id));
+                          }}
+                          className="text-gray-400 hover:text-blue-600"
+                        >
+                          {selectedProducts.length === products.length ? <CheckSquare size={20} /> : <Square size={20} />}
+                        </button>
+                      </th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Товар</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Тип</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Категорія</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Ціна</th>
+                      <th className="px-6 py-4 font-bold text-gray-600 text-right">Дії</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {products
+                      .filter(p => 
+                        p.name.toLowerCase().includes(productSearch.toLowerCase()) ||
+                        p.article?.toLowerCase().includes(productSearch.toLowerCase())
+                      )
+                      .slice(0, visibleProductsCount)
+                      .map(p => (
+                      <tr key={p.id} className={`hover:bg-gray-50/50 transition-colors ${selectedProducts.includes(p.id) ? 'bg-blue-50/30' : ''}`}>
+                        <td className="px-6 py-4">
+                          <button 
+                            onClick={() => {
+                              if (selectedProducts.includes(p.id)) setSelectedProducts(selectedProducts.filter(id => id !== p.id));
+                              else setSelectedProducts([...selectedProducts, p.id]);
+                            }}
+                            className={`${selectedProducts.includes(p.id) ? 'text-blue-600' : 'text-gray-300 hover:text-gray-400'}`}
+                          >
+                            {selectedProducts.includes(p.id) ? <CheckSquare size={20} /> : <Square size={20} />}
+                          </button>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden border border-gray-100 shadow-sm shrink-0">
+                              <img src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/100/100`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            </div>
+                            <a 
+                              href={`/product/${p.id}`} 
+                              target="_blank" 
+                              rel="noopener noreferrer"
+                              className="font-bold text-gray-900 hover:text-blue-600 transition-colors"
+                            >
+                              {p.name}
+                            </a>
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span className={`px-2 py-1 rounded-md text-[10px] font-black uppercase ${p.type === 'auto' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                            {p.type === 'auto' ? 'Авто' : 'Сантех'}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-600">{p.category}</td>
+                        <td className="px-6 py-4 font-bold text-gray-900">{p.price} грн</td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex items-center justify-end space-x-2">
+                            <button onClick={() => setEditingProduct(p)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors"><Edit size={18} /></button>
+                            <button onClick={() => handleDeleteProduct(p)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {products.length > visibleProductsCount && (
                 <div className="p-12 border-t border-gray-100 flex justify-center">
                   <button
@@ -2102,47 +3522,40 @@ export const AdminPage: React.FC = () => {
         )}
 
         {activeTab === 'orders' && (
-          <div className="space-y-8">
-            <div className="flex items-center justify-between">
-              <h1 className="text-4xl font-black text-gray-900">Замовлення</h1>
+          <div className="space-y-6">
+            <div className="bg-white p-4 sm:p-6 rounded-[24px] border border-gray-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h1 className="text-xl sm:text-2xl font-black text-gray-900 tracking-tight flex items-center gap-2">
+                  <span>Замовлення</span>
+                  <span className="text-xs font-black bg-blue-100 text-blue-700 px-2.5 py-1 rounded-full">{orders.length} шт</span>
+                </h1>
+                <p className="text-xs text-gray-400 mt-1 font-semibold">Переглядайте та оновлюйте поточні замовлення клієнтів</p>
+              </div>
+              
               <button 
                 onClick={handleExportOrders}
-                className="flex items-center space-x-2 bg-white border border-gray-200 px-6 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all"
+                className="flex items-center justify-center space-x-2 bg-white border border-gray-200 px-5 py-2.5 rounded-xl font-bold hover:bg-gray-50 transition-all text-xs sm:text-sm text-gray-700 w-full sm:w-auto active:scale-95 shadow-sm"
               >
-                <Download size={18} />
-                <span>Експорт XLSX</span>
+                <Download size={14} />
+                <span>Експорт у XLSX</span>
               </button>
             </div>
+
             <div className="bg-white rounded-3xl border border-gray-200 overflow-hidden">
-              <table className="w-full text-left">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="px-6 py-4 font-bold text-gray-600">ID</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Клієнт</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Товари</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Сума</th>
-                    <th className="px-6 py-4 font-bold text-gray-600">Статус</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {orders.map(o => (
-                    <tr key={o.id} className="hover:bg-gray-50/50 transition-colors">
-                      <td className="px-6 py-4 font-mono text-sm text-gray-500">#{o.id}</td>
-                      <td className="px-6 py-4">
-                        <div className="font-bold text-gray-900">{o.phone}</div>
-                        <div className="text-xs text-gray-500">{o.delivery_address}</div>
-                      </td>
-                      <td className="px-6 py-4">
-                        <div className="text-sm text-gray-600">
-                          {o.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 font-bold text-gray-900">{o.total_price} грн</td>
-                      <td className="px-6 py-4">
+              {/* Mobile view: Orders Cards Layout */}
+              <div className="block md:hidden divide-y divide-gray-100">
+                {orders.map(o => (
+                  <div key={o.id} className="p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-mono font-bold text-gray-400 bg-gray-50 border border-gray-100 px-2 py-0.5 rounded">
+                        #{o.id.toString().substring(0, 8)}
+                      </span>
+                      
+                      <div className="relative">
                         <select 
                           value={o.status}
                           onChange={e => handleUpdateOrderStatus(o.id, e.target.value)}
-                          className={`text-xs font-bold px-3 py-1.5 rounded-full border-none focus:ring-0 cursor-pointer ${
+                          className={`text-xs font-bold px-3 py-1.5 rounded-full border-none focus:ring-1 focus:ring-blue-500/20 cursor-pointer appearance-none pr-8 ${
                             o.status === 'delivered' ? 'bg-emerald-50 text-emerald-600' :
                             o.status === 'cancelled' ? 'bg-red-50 text-red-600' :
                             'bg-blue-50 text-blue-600'
@@ -2154,58 +3567,138 @@ export const AdminPage: React.FC = () => {
                           <option value="delivered">Доставлено</option>
                           <option value="cancelled">Скасовано</option>
                         </select>
-                      </td>
+                        <div className={`pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 pr-3 ${
+                          o.status === 'delivered' ? 'text-emerald-500' :
+                          o.status === 'cancelled' ? 'text-red-500' :
+                          'text-blue-500'
+                        }`}>
+                          <svg className="fill-current h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">
+                            <path d="M9.293 12.95l.707.707L15.657 8l-1.414-1.414L10 10.828 5.757 6.586 4.343 8z"/>
+                          </svg>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-1">
+                      <div className="text-sm font-black text-gray-900">{o.phone}</div>
+                      <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded-lg border border-gray-100/40">{o.delivery_address}</div>
+                    </div>
+                    
+                    <div className="space-y-1 bg-gray-50/50 p-2.5 rounded-lg border border-gray-100/30">
+                      <div className="text-[10px] font-black uppercase text-gray-400 tracking-wider">Товари:</div>
+                      <div className="space-y-1">
+                        {o.items.map((i, index) => (
+                          <div key={index} className="text-xs text-gray-700 flex justify-between">
+                            <span className="font-semibold line-clamp-1">{i.name}</span>
+                            <span className="font-extrabold shrink-0 text-gray-900 ml-2">x{i.quantity}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    <div className="flex justify-between items-center pt-1">
+                      <span className="text-xs font-bold text-gray-400">Загальна вартість:</span>
+                      <span className="text-sm font-black text-blue-600 bg-blue-50/50 px-2.5 py-1 rounded-lg">{o.total_price} грн</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop view: Classic Orders Table */}
+              <div className="hidden md:block overflow-x-auto">
+                <table className="w-full text-left min-w-[750px]">
+                  <thead className="bg-gray-50 border-b border-gray-200">
+                    <tr>
+                      <th className="px-6 py-4 font-bold text-gray-600">ID</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Клієнт</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Товари</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Сума</th>
+                      <th className="px-6 py-4 font-bold text-gray-600">Статус</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {orders.map(o => (
+                      <tr key={o.id} className="hover:bg-gray-50/50 transition-colors">
+                        <td className="px-6 py-4 font-mono text-sm text-gray-500">#{o.id}</td>
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-gray-900">{o.phone}</div>
+                          <div className="text-xs text-gray-500">{o.delivery_address}</div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <div className="text-sm text-gray-600">
+                            {o.items.map(i => `${i.name} (x${i.quantity})`).join(', ')}
+                          </div>
+                        </td>
+                        <td className="px-6 py-4 font-bold text-gray-900">{o.total_price} грн</td>
+                        <td className="px-6 py-4">
+                          <select 
+                            value={o.status}
+                            onChange={e => handleUpdateOrderStatus(o.id, e.target.value)}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-full border-none focus:ring-0 cursor-pointer ${
+                              o.status === 'delivered' ? 'bg-emerald-50 text-emerald-600' :
+                              o.status === 'cancelled' ? 'bg-red-50 text-red-600' :
+                              'bg-blue-50 text-blue-600'
+                            }`}
+                          >
+                            <option value="pending">Очікує</option>
+                            <option value="processing">В роботі</option>
+                            <option value="shipped">Відправлено</option>
+                            <option value="delivered">Доставлено</option>
+                            <option value="cancelled">Скасовано</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
 
         {activeTab === 'blog' && (
           <div className="space-y-8">
-            <div className="flex items-center justify-between">
-              <h1 className="text-4xl font-black text-gray-900">Управління блогом</h1>
-              <div className="flex flex-wrap gap-4">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+              <h1 className="text-2xl sm:text-4xl font-black text-gray-900">Управління блогом</h1>
+              <div className="flex flex-wrap gap-2 sm:gap-4">
                 <button 
                   onClick={seedBlogPosts}
                   disabled={isRefreshing}
-                  className="flex items-center space-x-2 bg-white border border-gray-200 px-6 py-3 rounded-xl font-bold hover:bg-gray-50 transition-all"
+                  className="flex items-center space-x-2 bg-white border border-gray-200 px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold hover:bg-gray-50 transition-all text-xs sm:text-sm"
                 >
                   <Sparkles size={18} className="text-blue-600" />
                   <span>Демо-статті</span>
                 </button>
                 <button 
                   onClick={async () => {
-                    if (confirm('Бажаєте, щоб AI написав нову SEO-статтю для вашого блогу?')) {
+                    if (confirm('Бажаєте, щоб система автоматично написала нову корисну SEO-статтю для вашого блогу?')) {
                       setIsGeneratingPost(true);
                       try {
                         const response = await fetch('/api/blog/generate', { method: 'POST' });
                         const data = await response.json();
                         if (data.success) {
-                          alert('AI успішно створив нову статтю!');
+                          alert('Нову корисну статтю успішно створено та додано до блогу!');
                           refreshAllData();
                         } else {
                           console.error('Generation error:', data);
-                          alert(`Помилка: ${data.error || 'Не вдалося згенерувати статтю'}\n\nПорада: Перевірте вкладку "Діагностика БД", можливо таблиця "blog" ще не створена.`);
+                          alert(`Помилка: ${data.error || 'Не вдалося створити статтю'}\n\nПорада: Перевірте вкладку "Діагностика БД", можливо таблиця "blog" ще не створена.`);
                         }
                       } catch (err: any) {
-                        alert(`Помилка при запиті до AI: ${err.message}\n\nПереконайтеся, що сервер запущений та налаштований GEMINI_API_KEY.`);
+                        alert(`Помилка при автоматичному створенні статті: ${err.message}\n\nПереконайтеся, що сервер запущений та налаштований GEMINI_API_KEY.`);
                       } finally {
                         setIsGeneratingPost(false);
                       }
                     }
                   }}
                   disabled={isGeneratingPost}
-                  className="flex items-center space-x-2 bg-purple-50 text-purple-600 border border-purple-100 px-6 py-3 rounded-xl font-bold hover:bg-purple-100 transition-all"
+                  className="flex items-center space-x-2 bg-purple-50 text-purple-600 border border-purple-100 px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold hover:bg-purple-100 transition-all text-xs sm:text-sm"
                 >
                   <Wand2 size={18} className={isGeneratingPost ? 'animate-bounce' : ''} />
-                  <span>Написати через AI</span>
+                  <span>Генерація SEO-статті</span>
                 </button>
                 <button 
                   onClick={() => setIsAddingPost(true)}
-                  className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-blue-700 transition-all"
+                  className="flex items-center space-x-2 bg-blue-600 text-white px-4 py-2.5 sm:px-6 sm:py-3 rounded-xl font-bold hover:bg-blue-700 transition-all text-xs sm:text-sm"
                 >
                   <Plus size={18} />
                   <span>Нова стаття</span>
@@ -2214,9 +3707,9 @@ export const AdminPage: React.FC = () => {
             </div>
 
             {isAddingPost && (
-              <div className="bg-white p-8 rounded-3xl border border-blue-100 shadow-xl">
+              <div className="bg-white p-5 sm:p-8 rounded-3xl border border-blue-100 shadow-xl">
                 <form onSubmit={handleAddPost} className="space-y-6">
-                  <div className="grid grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
                     <div className="space-y-2">
                       <label className="text-sm font-bold text-gray-600">Заголовок</label>
                       <input 
@@ -2290,19 +3783,31 @@ export const AdminPage: React.FC = () => {
 
             <div className="grid grid-cols-1 gap-4">
               {blogPosts.map(post => (
-                <div key={post.id} className="bg-white p-6 rounded-3xl border border-gray-200 flex items-center justify-between group">
+                <div key={post.id} className="bg-white p-4 sm:p-6 rounded-3xl border border-gray-200 flex flex-col sm:flex-row sm:items-center justify-between gap-4 group">
                   <div className="flex items-center space-x-4">
-                    <div className="w-16 h-16 bg-gray-100 rounded-2xl overflow-hidden">
-                      <img src={post.image || `https://picsum.photos/seed/${post.id}/100/100`} className="w-full h-full object-cover" />
+                    <div className="w-12 h-12 sm:w-16 sm:h-16 bg-gray-100 rounded-2xl overflow-hidden shrink-0 border border-gray-100 shadow-sm">
+                      <img src={post.image || `https://picsum.photos/seed/${post.id}/100/100`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
                     </div>
-                    <div>
-                      <h3 className="font-bold text-gray-900">{post.title}</h3>
-                      <div className="text-xs text-gray-500">{post.category} • {post.author} • {new Date(post.createdAt).toLocaleDateString()}</div>
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-gray-900 text-sm sm:text-base truncate">{post.title}</h3>
+                      <div className="text-xs text-gray-400 font-semibold mt-0.5">{post.category} • {post.author} • {new Date(post.createdAt).toLocaleDateString()}</div>
                     </div>
                   </div>
-                  <div className="flex items-center space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button onClick={() => setEditingPost(post)} className="p-2 text-gray-400 hover:text-blue-600"><Edit size={18} /></button>
-                    <button onClick={() => handleDeletePost(post.id)} className="p-2 text-gray-400 hover:text-red-500"><Trash2 size={18} /></button>
+                  <div className="flex items-center justify-end space-x-3 sm:space-x-1 border-t sm:border-t-0 pt-2 sm:pt-0 shrink-0 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                    <button 
+                      onClick={() => setEditingPost(post)} 
+                      className="p-2 sm:p-1.5 text-gray-500 hover:text-blue-600 bg-gray-50 sm:bg-transparent rounded-xl border border-gray-100 sm:border-transparent transition-all hover:bg-white flex items-center justify-center h-10 w-10 sm:h-auto sm:w-auto"
+                      title="Редагувати"
+                    >
+                      <Edit size={18} />
+                    </button>
+                    <button 
+                      onClick={() => handleDeletePost(post.id)} 
+                      className="p-2 sm:p-1.5 text-gray-500 hover:text-red-500 bg-gray-50 sm:bg-transparent rounded-xl border border-gray-100 sm:border-transparent transition-all hover:bg-white flex items-center justify-center h-10 w-10 sm:h-auto sm:w-auto"
+                      title="Видалити"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -2311,50 +3816,50 @@ export const AdminPage: React.FC = () => {
         )}
 
         {(activeTab as any) === 'content' && (
-          <div className="space-y-8">
-            <h1 className="text-4xl font-black text-gray-900">Редактор контенту</h1>
+          <div className="space-y-6 sm:space-y-8">
+            <h1 className="text-2xl sm:text-4xl font-black text-gray-900">Редактор контенту</h1>
             
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
               {['auto', 'plumbing'].map(type => (
-                <div key={type} className="bg-white p-8 rounded-[32px] border border-gray-200 space-y-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-xl font-black uppercase tracking-wider text-gray-400">
+                <div key={type} className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-gray-200 space-y-4 sm:space-y-6">
+                  <div className="flex items-center justify-between mb-2">
+                    <h3 className="text-base sm:text-xl font-black uppercase tracking-wider text-gray-400">
                       {type === 'auto' ? 'Автотовари' : 'Сантехніка'}
                     </h3>
-                    <div className={`px-3 py-1 rounded-full text-[10px] font-black uppercase ${type === 'auto' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'}`}>
+                    <div className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase ${type === 'auto' ? 'bg-blue-50 text-blue-600' : 'bg-indigo-50 text-indigo-600'}`}>
                       Hero Section
                     </div>
                   </div>
 
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-500">Badge Text</label>
+                  <div className="space-y-3 sm:space-y-4">
+                    <div className="space-y-1 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-bold text-gray-500">Badge Text</label>
                       <input 
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3" 
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
                         value={heroContent?.[type]?.badge || ''} 
                         onChange={e => setHeroContent({...heroContent, [type]: {...heroContent[type], badge: e.target.value}})}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-500">Title</label>
+                    <div className="space-y-1 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-bold text-gray-500">Title</label>
                       <input 
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3" 
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
                         value={heroContent?.[type]?.title || ''} 
                         onChange={e => setHeroContent({...heroContent, [type]: {...heroContent[type], title: e.target.value}})}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-500">Description</label>
+                    <div className="space-y-1 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-bold text-gray-500">Description</label>
                       <textarea 
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 h-24" 
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 h-24" 
                         value={heroContent?.[type]?.description || ''} 
                         onChange={e => setHeroContent({...heroContent, [type]: {...heroContent[type], description: e.target.value}})}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-sm font-bold text-gray-500">Button Text</label>
+                    <div className="space-y-1 sm:space-y-2">
+                      <label className="text-xs sm:text-sm font-bold text-gray-500">Button Text</label>
                       <input 
-                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3" 
+                        className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
                         value={heroContent?.[type]?.button || ''} 
                         onChange={e => setHeroContent({...heroContent, [type]: {...heroContent[type], button: e.target.value}})}
                       />
@@ -2364,10 +3869,10 @@ export const AdminPage: React.FC = () => {
               ))}
             </div>
 
-            <div className="flex justify-end">
+            <div className="flex justify-end pt-2">
               <button 
                 onClick={handleSaveHeroContent}
-                className="bg-blue-600 text-white px-12 py-4 rounded-2xl font-black text-lg shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all"
+                className="bg-blue-600 text-white px-8 sm:px-12 py-3.5 sm:py-4 rounded-xl font-black text-sm sm:text-base shadow-xl shadow-blue-600/20 hover:bg-blue-700 transition-all w-full sm:w-auto text-center"
               >
                 Зберегти всі зміни
               </button>
@@ -2375,91 +3880,91 @@ export const AdminPage: React.FC = () => {
           </div>
         )}
         {(activeTab as any) === 'settings' && (
-          <div className="space-y-8">
-            <h1 className="text-4xl font-black text-gray-900">Налаштування магазину</h1>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-              <div className="bg-white p-8 rounded-3xl border border-gray-200 space-y-6">
-                <h3 className="text-xl font-bold">Загальні</h3>
+          <div className="space-y-6 sm:space-y-8">
+            <h1 className="text-2xl sm:text-4xl font-black text-gray-900">Налаштування магазину</h1>
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-8">
+              <div className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-gray-200 space-y-6">
+                <h3 className="text-lg sm:text-xl font-bold">Загальні</h3>
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                    <div>
-                      <div className="font-bold">Технічний банер</div>
-                      <div className="text-xs text-gray-500">Показати банер про тех. роботи (товар у наявності)</div>
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm sm:text-base">Технічний банер</div>
+                      <div className="text-xs text-gray-400 sm:text-gray-500">Показати банер про тех. роботи (товар у наявності)</div>
                     </div>
                     <div 
                       onClick={() => handleToggleSetting('techBannerMode', !settings.techBannerMode)}
-                      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${settings.techBannerMode ? 'bg-blue-600' : 'bg-gray-200'}`}
+                      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${settings.techBannerMode ? 'bg-blue-600' : 'bg-gray-200'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${settings.techBannerMode ? 'right-1' : 'left-1'}`} />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                    <div>
-                      <div className="font-bold">Режим обслуговування</div>
-                      <div className="text-xs text-gray-500">Тимчасово закрити магазин для покупців</div>
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm sm:text-base">Режим обслуговування</div>
+                      <div className="text-xs text-gray-400 sm:text-gray-500">Тимчасово закрити магазин для покупців</div>
                     </div>
                     <div 
                       onClick={() => handleToggleSetting('maintenanceMode', !settings.maintenanceMode)}
-                      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${settings.maintenanceMode ? 'bg-blue-600' : 'bg-gray-200'}`}
+                      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${settings.maintenanceMode ? 'bg-blue-600' : 'bg-gray-200'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${settings.maintenanceMode ? 'right-1' : 'left-1'}`} />
                     </div>
                   </div>
-                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl">
-                    <div>
-                      <div className="font-bold">Сповіщення про замовлення</div>
-                      <div className="text-xs text-gray-500">Отримувати email про нові замовлення</div>
+                  <div className="flex items-center justify-between p-4 bg-gray-50 rounded-2xl gap-2">
+                    <div className="min-w-0">
+                      <div className="font-bold text-sm sm:text-base">Сповіщення про замовлення</div>
+                      <div className="text-xs text-gray-400 sm:text-gray-500">Отримувати email про нові замовлення</div>
                     </div>
                     <div 
                       onClick={() => handleToggleSetting('notifications', !settings.notifications)}
-                      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors ${settings.notifications ? 'bg-blue-600' : 'bg-gray-200'}`}
+                      className={`w-12 h-6 rounded-full relative cursor-pointer transition-colors shrink-0 ${settings.notifications ? 'bg-blue-600' : 'bg-gray-200'}`}
                     >
                       <div className={`absolute top-1 w-4 h-4 bg-white rounded-full shadow-sm transition-all ${settings.notifications ? 'right-1' : 'left-1'}`} />
                     </div>
                   </div>
                 </div>
               </div>
-              <div className="bg-white p-8 rounded-3xl border border-gray-200 space-y-6">
-                <h3 className="text-xl font-bold">Контакти</h3>
+              <div className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-gray-200 space-y-6">
+                <h3 className="text-lg sm:text-xl font-bold">Контакти</h3>
                 <div className="space-y-4">
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-500">Email підтримки</label>
+                  <div className="space-y-1 sm:space-y-2">
+                    <label className="text-xs sm:text-sm font-bold text-gray-500">Email підтримки</label>
                     <input 
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3" 
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
                       value={settings.supportEmail} 
                       onChange={e => setSettings({...settings, supportEmail: e.target.value})}
                     />
                   </div>
-                  <div className="space-y-2">
-                    <label className="text-sm font-bold text-gray-500">Телефон</label>
+                  <div className="space-y-1 sm:space-y-2">
+                    <label className="text-xs sm:text-sm font-bold text-gray-500">Телефон</label>
                     <input 
-                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3" 
+                      className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-2.5 sm:py-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20" 
                       value={settings.phone} 
                       onChange={e => setSettings({...settings, phone: e.target.value})}
                     />
                   </div>
                   <button 
                     onClick={handleSaveSettings}
-                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all"
+                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition-all text-sm sm:text-base mt-2"
                   >
                     Зберегти налаштування
                   </button>
                 </div>
               </div>
 
-              <div className="bg-white p-8 rounded-3xl border border-gray-200 space-y-6 col-span-1 md:col-span-2">
-                <h3 className="text-xl font-bold">Інтеграція з UTR (Order24)</h3>
-                <div className="p-6 bg-gray-50 rounded-2xl space-y-4">
-                  <div className="flex items-center justify-between">
+              <div className="bg-white p-5 sm:p-8 rounded-[24px] sm:rounded-[32px] border border-gray-200 space-y-6 col-span-1 lg:col-span-2">
+                <h3 className="text-lg sm:text-xl font-bold">Інтеграція з UTR (Order24)</h3>
+                <div className="p-4 sm:p-6 bg-gray-50 rounded-2xl space-y-4 animate-none">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
-                      <div className="font-bold">Синхронізація прайс-листів</div>
-                      <div className="text-sm text-gray-500">Отримати актуальні товари та ціни з UTR API</div>
+                      <div className="font-bold text-sm sm:text-base">Синхронізація прайс-листів</div>
+                      <div className="text-xs sm:text-sm text-gray-400 sm:text-gray-500">Отримати актуальні товари та ціни з UTR API</div>
                     </div>
                     <button 
                       onClick={handleSyncUTR}
                       disabled={isSyncingUTR}
-                      className={`px-8 py-3 rounded-xl font-bold transition-all ${
-                        isSyncingUTR ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200'
+                      className={`px-6 sm:px-8 py-2.5 sm:py-3 rounded-xl font-bold transition-all text-xs sm:text-sm w-full sm:w-auto text-center ${
+                        isSyncingUTR ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200/50'
                       }`}
                     >
                       {isSyncingUTR ? 'Синхронізація...' : 'Синхронізувати зараз'}
@@ -2468,7 +3973,7 @@ export const AdminPage: React.FC = () => {
                   <div className="p-4 bg-blue-50 border border-blue-100 rounded-xl flex items-start space-x-3">
                     <Package className="text-blue-500 shrink-0" size={20} />
                     <div className="text-xs text-blue-800">
-                      Переконайтеся, що ви додали <code className="bg-blue-100 px-1 rounded">UTR_API_KEY</code> у налаштуваннях проекту.
+                      Переконайтеся, що ви додали <code className="bg-blue-100 px-1 rounded font-bold">UTR_API_KEY</code> у налаштуваннях проекту.
                     </div>
                   </div>
                 </div>
@@ -2506,6 +4011,10 @@ export const AdminPage: React.FC = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {activeTab === 'chat' && (
+          <AdminChatTab />
         )}
 
         {activeTab === ('diagnostics' as any) && (
@@ -2671,16 +4180,23 @@ export const AdminPage: React.FC = () => {
                     Скопіюйте SQL нижче, зайдіть в <b>SQL Editor</b> у Supabase і виконайте його:
                   </p>
                   <div className="bg-gray-900 text-green-400 p-4 rounded-xl font-mono text-[10px] leading-relaxed">
-                    ALTER TABLE products DISABLE ROW LEVEL SECURITY;
+                    ALTER TABLE products DISABLE ROW LEVEL SECURITY;<br/>
+                    ALTER TABLE orders DISABLE ROW LEVEL SECURITY;<br/>
+                    ALTER TABLE blog DISABLE ROW LEVEL SECURITY;<br/>
+                    ALTER TABLE shop_settings DISABLE ROW LEVEL SECURITY;
                   </div>
                   <button 
                     onClick={() => {
-                      navigator.clipboard.writeText(`ALTER TABLE products DISABLE ROW LEVEL SECURITY;`);
-                      alert('SQL скопійовано! Зайдіть у Supabase -> SQL Editor -> Новий запит -> Вставте і натисніть Run.');
+                      const sql = `ALTER TABLE products DISABLE ROW LEVEL SECURITY;
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE blog DISABLE ROW LEVEL SECURITY;
+ALTER TABLE shop_settings DISABLE ROW LEVEL SECURITY;`;
+                      navigator.clipboard.writeText(sql);
+                      alert('SQL (для всіх таблиць) скопійовано! Зайдіть у Supabase -> SQL Editor -> Новий запит -> Вставте і натисніть Run.');
                     }}
                     className="w-full py-4 bg-red-600 text-white rounded-xl font-bold text-sm hover:bg-red-700 shadow-lg shadow-red-200 transition-all flex items-center justify-center gap-2"
                   >
-                    Скопіювати SQL для вимкнення RLS
+                    Скопіювати SQL для всього сайту
                   </button>
                 </div>
               </div>
@@ -2692,12 +4208,91 @@ export const AdminPage: React.FC = () => {
                 <h3>Базовий SQL для структури</h3>
               </div>
               <div className="space-y-4">
-                <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto min-h-[100px]">
+                <div className="text-xs font-bold text-gray-400 uppercase">Таблиця Products</div>
+                <pre className="bg-gray-900 text-gray-100 p-4 rounded-xl text-xs overflow-x-auto">
                   {`ALTER TABLE products ADD COLUMN IF NOT EXISTS type TEXT DEFAULT 'auto';
 ALTER TABLE products ADD COLUMN IF NOT EXISTS brand TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS article TEXT;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`}
                 </pre>
+
+                <div className="text-xs font-bold text-gray-400 uppercase mt-4">Таблиця Content (ВИРІШУЄ ПОМИЛКУ РЕДАКТОРА КОНТЕНТУ & HELPER)</div>
+                <div className="bg-blue-50 border border-blue-100 p-4 rounded-xl text-xs text-blue-800 leading-relaxed font-semibold">
+                  ⚠️ Якщо у вас не зберегаються налаштування сайту або налаштування розділу Hero, виконайте цей SQL запит у вашому Supabase, щоб створити таблицю dynamic-content:
+                </div>
+                <pre className="bg-gray-900 text-blue-400 p-4 rounded-xl text-xs overflow-x-auto">
+{`CREATE TABLE IF NOT EXISTS content (
+  key TEXT PRIMARY KEY,
+  value JSONB NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE content DISABLE ROW LEVEL SECURITY;`}
+                </pre>
+
+                <div className="text-xs font-bold text-gray-400 uppercase mt-4">Таблиця Blog (ДЛЯ СТАТЕЙ ТА НОВИН)</div>
+                <div className="bg-indigo-50 border border-indigo-100 p-4 rounded-xl text-xs text-indigo-800 leading-relaxed font-semibold">
+                  ⚠️ Якщо ви бажаєте створити або переналаштувати таблицю для блогу, виконайте цей SQL:
+                </div>
+                <pre className="bg-gray-900 text-indigo-400 p-4 rounded-xl text-xs overflow-x-auto">
+{`CREATE TABLE IF NOT EXISTS blog (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  title TEXT NOT NULL,
+  excerpt TEXT NOT NULL,
+  content TEXT NOT NULL,
+  author TEXT NOT NULL,
+  category TEXT NOT NULL,
+  image_url TEXT,
+  read_time TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE blog DISABLE ROW LEVEL SECURITY;`}
+                </pre>
+                
+                <div className="text-xs font-bold text-gray-400 uppercase mt-4">Таблиця Orders (ВИРІШУЄ ПОМИЛКУ ОФОРМЛЕННЯ)</div>
+                <div className="bg-amber-50 border border-amber-100 p-4 rounded-xl text-xs text-amber-800 leading-relaxed font-semibold">
+                  ⚠️ Якщо у користувачів виникає помилка при оформленні — це означає, що ваша таблиця orders має застарілу або неправильну структуру. Виконайте SQL скрипт нижче: він видалить стару пусту таблицю і створить правильну з усіма необхідними полями.
+                </div>
+                <pre className="bg-gray-900 text-green-400 p-4 rounded-xl text-[10px] overflow-x-auto leading-tight font-mono">
+{`DROP TABLE IF EXISTS orders CASCADE;
+
+CREATE TABLE orders (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  items TEXT NOT NULL,
+  total_price NUMERIC NOT NULL,
+  phone TEXT NOT NULL,
+  delivery_address TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' NOT NULL,
+  user_id TEXT
+);
+
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;`}
+                </pre>
+                <button 
+                  onClick={() => {
+                    const sql = `DROP TABLE IF EXISTS orders CASCADE;
+
+CREATE TABLE orders (
+  id BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  items TEXT NOT NULL,
+  total_price NUMERIC NOT NULL,
+  phone TEXT NOT NULL,
+  delivery_address TEXT NOT NULL,
+  status TEXT DEFAULT 'pending' NOT NULL,
+  user_id TEXT
+);
+
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;`;
+                    navigator.clipboard.writeText(sql);
+                    alert('SQL-скрипт копіювання успішно завершено! Вставте його в SQL Editor у Supabase та натисніть Run.');
+                  }}
+                  className="w-full py-3 bg-blue-600 text-white rounded-xl text-xs font-black shadow-lg shadow-blue-200 hover:bg-blue-700 transition-all flex items-center justify-center gap-2"
+                >
+                  СКОПІЮВАТИ SQL ДЛЯ ОНОВЛЕННЯ ЗАМОВЛЕНЬ
+                </button>
               </div>
             </div>
 
@@ -2716,7 +4311,7 @@ ALTER TABLE products ADD COLUMN IF NOT EXISTS image_url TEXT;`}
                   <li><b>Environment variables</b> → <b>Add a variable</b></li>
                   <li>Додайте <b>VITE_SUPABASE_URL</b> та його значення</li>
                   <li>Додайте <b>VITE_SUPABASE_ANON_KEY</b> та його значення</li>
-                  <li>Додайте <b>GEMINI_API_KEY</b> для роботи Blog AI</li>
+                  <li>Додайте <b>GEMINI_API_KEY</b> для авто-генерації блогу</li>
                   <li>Перезапустіть деплой (Deploys → Trigger deploy)</li>
                 </ol>
               </div>
