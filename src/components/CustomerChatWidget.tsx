@@ -23,6 +23,26 @@ export const CustomerChatWidget: React.FC = () => {
   const [inputText, setInputText] = useState('');
   const [unreadCount, setUnreadCount] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
+
+  // Close when clicking outside of the active chat window
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (isOpen && widgetRef.current && !widgetRef.current.contains(event.target as Node)) {
+        // Prevent closing if we are clicking on the toggle button
+        const toggleBtn = document.getElementById('chat-toggle-btn');
+        if (toggleBtn && toggleBtn.contains(event.target as Node)) {
+          return;
+        }
+        setIsOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
 
   // Initialize or restore session
   useEffect(() => {
@@ -198,29 +218,30 @@ export const CustomerChatWidget: React.FC = () => {
 
             <motion.div
               id="support-chat-window"
+              ref={widgetRef}
               initial={{ opacity: 0, scale: 0.85, y: 60 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.85, y: 60 }}
               transition={{ type: 'spring', damping: 22, stiffness: 220 }}
-              className="fixed bottom-6 right-6 w-80 sm:w-96 h-[510px] bg-white dark:bg-gray-900 rounded-[28px] shadow-2xl border border-gray-100 dark:border-gray-800 flex flex-col overflow-hidden z-50 origin-bottom-right"
+              className="fixed bottom-6 right-6 w-85 sm:w-96 h-[510px] bg-white dark:bg-gray-900 rounded-[28px] shadow-2xl border border-gray-100 dark:border-gray-800 flex flex-col overflow-hidden z-50 origin-bottom-right"
             >
               {/* Header */}
               <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-4 text-white flex items-center justify-between shadow-md relative">
                 <div className="flex items-center space-x-3">
                   <div className="w-2.5 h-2.5 bg-green-400 rounded-full animate-ping" />
                   <div>
-                    <h4 className="font-extrabold text-xs sm:text-sm tracking-wide">MOTO-LIDER ЧАТ</h4>
-                    <p className="text-[10px] text-blue-100 opacity-90">Менеджери онлайн</p>
+                    <h4 className="font-extrabold text-sm tracking-wide">MOTO-LIDER ЧАТ</h4>
+                    <p className="text-[10px] text-blue-100 opacity-90 font-medium">Менеджери онлайн</p>
                   </div>
                 </div>
                 
                 {/* Beautiful circle close button matching cart drawer style */}
                 <button
                   onClick={() => setIsOpen(false)}
-                  className="p-2 -mr-1 text-white hover:bg-white/15 dark:hover:bg-gray-800/40 rounded-full transition-all cursor-pointer flex items-center justify-center border border-transparent hover:border-white/10 active:scale-90"
+                  className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-full transition-all cursor-pointer flex items-center justify-center border border-white/10 hover:border-white/20 active:scale-90 shadow-sm"
                   aria-label="Закрити чат"
                 >
-                  <X size={22} />
+                  <X size={20} className="stroke-[2.5]" />
                 </button>
               </div>
 

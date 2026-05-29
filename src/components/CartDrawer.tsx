@@ -26,17 +26,15 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void; onChec
           >
             <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
               <div className="flex items-center space-x-3">
-                <button 
-                  onClick={onClose}
-                  className="md:hidden p-2 -ml-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors"
-                >
-                  <X size={24} />
-                </button>
                 <ShoppingBag className="text-blue-600 dark:text-blue-400" />
-                <h2 className="text-xl font-bold dark:text-white">Кошик</h2>
+                <h2 className="text-xl font-black dark:text-white">Кошик</h2>
               </div>
-              <button onClick={onClose} className="hidden md:block p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors dark:text-white">
-                <X size={20} />
+              <button 
+                onClick={onClose} 
+                className="p-2.5 text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all border border-gray-100 dark:border-gray-800 hover:text-gray-950 dark:hover:text-white active:scale-90 flex items-center justify-center cursor-pointer shadow-sm"
+                aria-label="Закрити кошик"
+              >
+                <X size={20} className="stroke-[2.5]" />
               </button>
             </div>
 
