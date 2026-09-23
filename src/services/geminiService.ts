@@ -1,18 +1,3 @@
-import { GoogleGenAI, Type } from "@google/genai";
-
-let genAI: GoogleGenAI | null = null;
-
-function getGenAI() {
-  if (!genAI) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey || apiKey === "undefined") {
-      throw new Error("GEMINI_API_KEY is not configured.");
-    }
-    genAI = new GoogleGenAI({ apiKey });
-  }
-  return genAI;
-}
-
 export interface ColumnMapping {
   name: string;
   price: string;
@@ -26,86 +11,44 @@ export interface ColumnMapping {
 
 export async function getColumnMapping(sampleData: any[]): Promise<ColumnMapping | null> {
   try {
-    const prompt = `
-      I have an Excel file with product data. Here are the first few rows of the data (represented as JSON objects where keys are column headers):
-      ${JSON.stringify(sampleData.slice(0, 5), null, 2)}
-
-      Please identify which column headers correspond to the following product fields:
-      1. Product Name (Назва товару)
-      2. Price (Ціна)
-      3. Category (Категорія) - Note: If the file uses "group headers" (rows that define category for following items), specify the column that contains these category names.
-      4. Article/SKU (Артикул/Код)
-      5. Brand/Manufacturer (Бренд/Виробник/Країна виробника)
-      6. Stock/Quantity (Кількість/Залишок)
-      7. Description (Опис/Опис для сайту)
-      8. Image URL (Фото/Посилання на зображення)
-
-      Return the mapping as a JSON object where the keys are "name", "price", "category", "article", "brand", "stock", "description", "image" and the values are the EXACT column headers from the provided data.
-      If a field is not found, use an empty string.
-    `;
-
-    const ai = getGenAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            name: { type: Type.STRING },
-            price: { type: Type.STRING },
-            category: { type: Type.STRING },
-            article: { type: Type.STRING },
-            brand: { type: Type.STRING },
-            stock: { type: Type.STRING },
-            description: { type: Type.STRING },
-            image: { type: Type.STRING },
-          },
-          required: ["name", "price", "category", "article", "brand", "stock", "description", "image"],
-        },
-      },
+    const res = await fetch("/api/ai/column-mapping", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sampleData }),
     });
-
-    if (response.text) {
-      return JSON.parse(response.text.trim()) as ColumnMapping;
+    if (!res.ok) {
+      throw new Error(`Server returned ${res.status}`);
     }
-    return null;
+    return await res.json();
   } catch (error) {
-    console.error("Error getting column mapping from Gemini:", error);
-    return null;
+    console.warn("Client column mapping fetch failed, using local heuristics:", error);
+    const headers = Object.keys((sampleData && sampleData[0]) || {});
+    const findHeader = (patterns: RegExp[]) => headers.find(h => patterns.some(p => p.test(h))) || "";
+    return {
+      name: findHeader([/назв/i, /товар/i, /наймен/i, /name/i, /title/i]),
+      price: findHeader([/цін/i, /price/i, /вартість/i, /сума/i]),
+      category: findHeader([/категор/i, /category/i, /група/i, /розділ/i]),
+      article: findHeader([/артикул/i, /код/i, /sku/i, /article/i, /номер/i]),
+      brand: findHeader([/бренд/i, /виробник/i, /brand/i, /марка/i]),
+      stock: findHeader([/кільк/i, /залиш/i, /склад/i, /stock/i, /qty/i, /count/i]),
+      description: findHeader([/опис/i, /desc/i, /характеристик/i]),
+      image: findHeader([/фото/i, /зображ/i, /image/i, /img/i, /картинк/i, /url/i]),
+    };
   }
 }
 
-export async function getGeminiResponse(prompt: string, products: any[]) {
+export async function getGeminiResponse(prompt: string, _products?: any[]) {
   try {
-    const systemInstruction = `
-      Ви — експерт-консультант магазину AutoPlumb (автотовари та сантехніка).
-      Ваша мета — допомагати клієнтам підбирати товари.
-      
-      Ось список доступних товарів:
-      ${JSON.stringify(products.map(p => ({ name: p.name, price: p.price, category: p.category, type: p.type })), null, 2)}
-      
-      Правила:
-      1. Відповідайте українською мовою.
-      2. Будьте ввічливими та професійними.
-      3. Якщо клієнт шукає щось конкретне, пропонуйте товари зі списку.
-      4. Якщо товару немає, запропонуйте альтернативу або скажіть, що ми можемо привезти під замовлення.
-      5. Використовуйте Markdown для форматування (жирний текст, списки).
-    `;
-
-    const ai = getGenAI();
-    const response = await ai.models.generateContent({
-      model: "gemini-flash-latest",
-      contents: prompt,
-      config: {
-        systemInstruction: systemInstruction,
-      },
+    const res = await fetch("/api/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: prompt }),
     });
-
-    return response.text;
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.response || null;
   } catch (error) {
-    console.error("Error calling Gemini:", error);
+    console.error("Error calling server chat:", error);
     return null;
   }
 }

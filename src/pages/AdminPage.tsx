@@ -3,6 +3,7 @@ import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Up
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
 import { AdminChatTab } from '../components/AdminChatTab';
+import { AdminAiPhotoStudio } from '../components/AdminAiPhotoStudio';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -307,7 +308,7 @@ const MultiImageUploader: React.FC<MultiImageUploaderProps> = ({ imagesString, o
 export const AdminPage: React.FC = () => {
   const { isAdmin, loading } = useAuth();
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'content' | 'settings' | 'blog' | 'diagnostics' | 'chat'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'products' | 'orders' | 'content' | 'settings' | 'blog' | 'diagnostics' | 'chat' | 'ai_photos'>('dashboard');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [showDbOps, setShowDbOps] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
@@ -1784,6 +1785,15 @@ export const AdminPage: React.FC = () => {
           <MessageSquare size={14} />
           <span>Онлайн Чат</span>
         </button>
+        <button
+          onClick={() => setActiveTab('ai_photos')}
+          className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-black shrink-0 transition-all ${
+            activeTab === 'ai_photos' ? 'bg-purple-600 text-white shadow-sm shadow-purple-600/10' : 'bg-purple-50 text-purple-700 hover:bg-purple-100'
+          }`}
+        >
+          <Sparkles size={14} className="text-amber-400 animate-pulse" />
+          <span>AI Фото</span>
+        </button>
       </div>
 
       {/* Mobile Sidebar Slider Drawer */}
@@ -1871,6 +1881,15 @@ export const AdminPage: React.FC = () => {
                   <MessageSquare size={20} />
                   <span>Онлайн Чат</span>
                 </button>
+                <button 
+                  onClick={() => { setActiveTab('ai_photos'); setIsMobileMenuOpen(false); }}
+                  className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+                    activeTab === 'ai_photos' ? 'bg-purple-50 text-purple-600' : 'text-gray-500 hover:bg-gray-50'
+                  }`}
+                >
+                  <Sparkles size={20} className="text-amber-500" />
+                  <span>AI Фото-Студія</span>
+                </button>
               </nav>
               
               <div className="mt-8 space-y-1.5 pt-4 border-t border-gray-100">
@@ -1955,6 +1974,15 @@ export const AdminPage: React.FC = () => {
           >
             <MessageSquare size={20} />
             <span>Онлайн Чат</span>
+          </button>
+          <button 
+            onClick={() => setActiveTab('ai_photos')}
+            className={`w-full flex items-center space-x-3 px-4 py-3 rounded-xl font-bold transition-all ${
+              activeTab === 'ai_photos' ? 'bg-purple-50 text-purple-600' : 'text-gray-500 hover:bg-gray-50'
+            }`}
+          >
+            <Sparkles size={20} className="text-amber-500" />
+            <span>AI Фото-Студія</span>
           </button>
         </nav>
         <div className="mt-8 space-y-2 border-t border-gray-150 pt-4">
@@ -2849,6 +2877,28 @@ export const AdminPage: React.FC = () => {
                   title="Оновити дані"
                 >
                   <RotateCw className={isRefreshing ? 'animate-spin' : ''} size={16} />
+                </button>
+              </div>
+
+              {/* AI Photo Studio Banner */}
+              <div className="bg-gradient-to-r from-purple-900 via-indigo-900 to-blue-900 text-white p-4 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 shadow-md">
+                <div className="flex items-start gap-3">
+                  <div className="p-2 bg-white/10 rounded-xl shrink-0">
+                    <Sparkles className="text-amber-400 animate-pulse" size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-purple-200">AI Автоматизація Фотографій</h4>
+                    <p className="text-xs text-blue-100 font-medium">
+                      Виявлення однакових дублікатів, водяних знаків та невідповідних фото цілих авто замість конкретних деталей.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setActiveTab('ai_photos')}
+                  className="w-full sm:w-auto bg-white text-purple-900 hover:bg-purple-50 rounded-xl px-4 py-2 text-xs font-black shadow-md transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                >
+                  <Wand2 size={14} className="text-purple-700" />
+                  <span>Відкрити AI Фото-Студію</span>
                 </button>
               </div>
 
@@ -4015,6 +4065,16 @@ export const AdminPage: React.FC = () => {
 
         {activeTab === 'chat' && (
           <AdminChatTab />
+        )}
+
+        {activeTab === 'ai_photos' && (
+          <AdminAiPhotoStudio
+            products={products}
+            onProductUpdated={(updatedProduct) => {
+              setProducts(prev => prev.map(p => p.id === updatedProduct.id ? updatedProduct : p));
+            }}
+            onBatchUpdated={refreshAllData}
+          />
         )}
 
         {activeTab === ('diagnostics' as any) && (
