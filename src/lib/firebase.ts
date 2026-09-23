@@ -1,11 +1,21 @@
-import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { getFirestore } from 'firebase/firestore';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { initializeApp, getApps, getApp, FirebaseApp } from 'firebase/app';
+import { getAuth, GoogleAuthProvider, signInWithPopup, Auth } from 'firebase/auth';
+import { getFirestore, Firestore } from 'firebase/firestore';
+import baseConfig from '../../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
-export const db = getFirestore(app);
+const apiKey =
+  (typeof import.meta !== 'undefined' && import.meta.env?.VITE_FIREBASE_API_KEY) ||
+  baseConfig.apiKey ||
+  'AIzaSyC_S3_MMZ5U3b1eveY8CNpo0B6tGLm0fhk';
+
+const firebaseConfig = {
+  ...baseConfig,
+  apiKey,
+};
+
+export const app: FirebaseApp = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+export const auth: Auth = getAuth(app);
+export const db: Firestore = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
 
 export const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
