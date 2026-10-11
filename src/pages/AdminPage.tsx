@@ -610,7 +610,7 @@ export const AdminPage: React.FC = () => {
 
       const [resCount, resProducts, resOrders, resBlog] = await Promise.all([
         supabase.from('products').select('*', { count: 'exact', head: true }),
-        prodQuery.order('created_at', { ascending: false }).limit(200),
+        prodQuery.order('created_at', { ascending: false }).limit(activeTab === 'ai_photos' ? 1000 : 300),
         supabase.from('orders').select('*').order('created_at', { ascending: false }),
         supabase.from('blog').select('*').order('created_at', { ascending: false })
       ]);
@@ -2836,6 +2836,15 @@ export const AdminPage: React.FC = () => {
                 
                 <div className="flex items-center gap-2">
                   <button 
+                    onClick={() => setActiveTab('ai_photos')}
+                    className="flex items-center justify-center space-x-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-4 py-2.5 rounded-xl font-black transition-all text-xs sm:text-sm shadow-md shadow-orange-500/20 active:scale-95 cursor-pointer"
+                    title="Швидкий аналіз фотографій та якості товарів"
+                  >
+                    <Sparkles size={16} className="text-amber-200" />
+                    <span>Аналіз</span>
+                  </button>
+
+                  <button 
                     onClick={() => setIsAddingProduct(true)}
                     className="flex-1 sm:flex-none flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold transition-all text-xs sm:text-sm shadow-md shadow-blue-600/10 active:scale-95"
                   >
@@ -2893,13 +2902,22 @@ export const AdminPage: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                <button
-                  onClick={() => setActiveTab('ai_photos')}
-                  className="w-full sm:w-auto bg-white text-purple-900 hover:bg-purple-50 rounded-xl px-4 py-2 text-xs font-black shadow-md transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
-                >
-                  <Wand2 size={14} className="text-purple-700" />
-                  <span>Відкрити AI Фото-Студію</span>
-                </button>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <button
+                    onClick={() => setActiveTab('ai_photos')}
+                    className="flex-1 sm:flex-none bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-xl px-4 py-2 text-xs font-black shadow-md transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <Sparkles size={14} className="text-amber-200" />
+                    <span>Аналіз</span>
+                  </button>
+                  <button
+                    onClick={() => setActiveTab('ai_photos')}
+                    className="flex-1 sm:flex-none bg-white text-purple-900 hover:bg-purple-50 rounded-xl px-4 py-2 text-xs font-black shadow-md transition-all flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                  >
+                    <Wand2 size={14} className="text-purple-700" />
+                    <span>Відкрити AI Фото-Студію</span>
+                  </button>
+                </div>
               </div>
 
               {/* Plumbing prefix fix alert banner */}
@@ -3052,6 +3070,13 @@ export const AdminPage: React.FC = () => {
                 <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between bg-blue-50/40 border border-blue-100 p-3 rounded-xl animate-slide-in">
                   <span className="text-xs font-bold text-blue-700">Вибрано товарів: <span className="font-extrabold">{selectedProducts.length}</span></span>
                   <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <button 
+                      onClick={() => setActiveTab('ai_photos')}
+                      className="flex-1 sm:flex-none flex items-center justify-center space-x-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white px-3 py-1.5 rounded-lg text-xs font-black transition-all shadow-md shadow-orange-500/20 active:scale-95 cursor-pointer"
+                    >
+                      <Sparkles size={12} className="text-amber-200" />
+                      <span>Аналіз фото ({selectedProducts.length})</span>
+                    </button>
                     <button 
                       onClick={() => {
                         const targetList = products.filter(p => selectedProducts.includes(p.id));

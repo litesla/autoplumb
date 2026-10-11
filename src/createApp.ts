@@ -6,6 +6,7 @@ import path from "path";
 import fs from "fs";
 import dotenv from "dotenv";
 import { createRateLimiter } from "./middleware/rateLimiter";
+import { isWatermarkedOrBadPhoto, getCuratedFallback } from "./services/productImageService";
 
 dotenv.config();
 
@@ -668,19 +669,32 @@ export async function createExpressApp() {
   // Batch photo fix endpoint
   app.post("/api/ai/photos/batch-fix", async (req, res) => {
     try {
-      const { updates } = req.body || {}; // array of { id, imageUrl }
+      const { updates, markApproved = true } = req.body || {}; // array of { id, imageUrl }
       if (!Array.isArray(updates) || updates.length === 0) {
         return res.status(400).json({ error: "Updates array is required" });
       }
 
       let updatedCount = 0;
-      for (const item of updates) {
-        if (!item.id || !item.imageUrl) continue;
-        const { error } = await supabase
-          .from("products")
-          .update({ image_url: item.imageUrl })
-          .eq("id", item.id);
-        if (!error) updatedCount++;
+      const CHUNK_SIZE = 25;
+      for (let i = 0; i < updates.length; i += CHUNK_SIZE) {
+        const chunk = updates.slice(i, i + CHUNK_SIZE);
+        await Promise.all(
+          chunk.map(async (item) => {
+            if (!item.id || !item.imageUrl) return;
+            const updatePayload: any = { image_url: item.imageUrl };
+            if (markApproved) {
+              updatePayload.specs = JSON.stringify({
+                photoApproved: true,
+                photoApprovedAt: new Date().toISOString(),
+              });
+            }
+            const { error } = await supabase
+              .from("products")
+              .update(updatePayload)
+              .eq("id", item.id);
+            if (!error) updatedCount++;
+          })
+        );
       }
 
       res.json({ success: true, count: updatedCount });
@@ -689,6 +703,87 @@ export async function createExpressApp() {
       res.status(500).json({ error: error.message });
     }
   });
+
+  // Background catalog auto-fix routine
+  let isFixingRunning = false;
+  const runAutoFixCatalog = async () => {
+    if (isFixingRunning) return 0;
+    isFixingRunning = true;
+    try {
+      const PAGE_SIZE = 400;
+      let offset = 0;
+      let totalFixed = 0;
+
+      while (true) {
+        const { data, error } = await supabase
+          .from("products")
+          .select("id, name, category, brand, type, image_url, specs")
+          .range(offset, offset + PAGE_SIZE - 1);
+
+        if (error || !data || data.length === 0) break;
+
+        const updates: Array<{ id: string; newUrl: string }> = [];
+
+        for (const p of data) {
+          const currentUrl = (p.image_url || "").trim();
+          const isBad = isWatermarkedOrBadPhoto(currentUrl, p.name);
+          if (isBad || !currentUrl) {
+            const cleanUrl = getCuratedFallback(p.name, p.type || "auto", p.category || "", p.id);
+            updates.push({ id: p.id, newUrl: cleanUrl });
+          }
+        }
+
+        if (updates.length > 0) {
+          const CHUNK = 25;
+          for (let i = 0; i < updates.length; i += CHUNK) {
+            const chunk = updates.slice(i, i + CHUNK);
+            await Promise.all(
+              chunk.map(async (item) => {
+                const { error: upErr } = await supabase
+                  .from("products")
+                  .update({
+                    image_url: item.newUrl,
+                    specs: JSON.stringify({
+                      photoApproved: true,
+                      photoApprovedAt: new Date().toISOString(),
+                    }),
+                  })
+                  .eq("id", item.id);
+                if (!upErr) totalFixed++;
+              })
+            );
+          }
+        }
+
+        offset += data.length;
+        if (data.length < PAGE_SIZE) break;
+      }
+      return totalFixed;
+    } catch (err) {
+      console.error("AutoFix catalog error:", err);
+      return 0;
+    } finally {
+      isFixingRunning = false;
+    }
+  };
+
+  // Endpoint to trigger full auto-fix
+  app.post("/api/ai/photos/auto-fix-all", async (req, res) => {
+    try {
+      const count = await runAutoFixCatalog();
+      res.json({ success: true, fixedCount: count });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  // Automated background schedule: run on startup (after 5s) and every 30 minutes
+  setTimeout(() => {
+    runAutoFixCatalog().catch(console.error);
+  }, 5000);
+  setInterval(() => {
+    runAutoFixCatalog().catch(console.error);
+  }, 30 * 60 * 1000);
 
   return app;
 }

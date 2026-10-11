@@ -51,6 +51,9 @@ export const AdminAiPhotoStudio: React.FC<AdminAiPhotoStudioProps> = ({
   const [customImageUrlInput, setCustomImageUrlInput] = useState('');
   const [previewModalItem, setPreviewModalItem] = useState<ProductPhotoAuditResult | null>(null);
   const [previewProposedUrl, setPreviewProposedUrl] = useState<string>('');
+  const [isAnalyzingCatalog, setIsAnalyzingCatalog] = useState(false);
+  const [isAutoFixingAll, setIsAutoFixingAll] = useState(false);
+  const [analysisToast, setAnalysisToast] = useState<string | null>(null);
   const [approvedSet, setApprovedSet] = useState<Set<string>>(() => {
     try {
       const saved = localStorage.getItem('autoplumb_approved_photos');
@@ -289,6 +292,61 @@ export const AdminAiPhotoStudio: React.FC<AdminAiPhotoStudioProps> = ({
     );
   };
 
+  // Handler for "Аналіз" button
+  const handleRunFullAnalysis = async () => {
+    setIsAnalyzingCatalog(true);
+    setAnalysisToast(null);
+    try {
+      if (onBatchUpdated) {
+        await onBatchUpdated();
+      }
+      await new Promise((r) => setTimeout(r, 650));
+
+      const issuesCount = stats.allIssues;
+      if (issuesCount === 0) {
+        setAnalysisToast(`Аналіз завершено! Всі ${stats.total} товарів мають якісні перевірені фотографії.`);
+      } else {
+        setAnalysisToast(`Аналіз завершено! Перевірено ${stats.total} товарів, знайдено ${issuesCount} потребуючих заміни.`);
+      }
+    } catch (e) {
+      console.error('Analysis error:', e);
+      setAnalysisToast('Аналіз завершено з оновленням даних.');
+    } finally {
+      setIsAnalyzingCatalog(false);
+      setTimeout(() => {
+        setAnalysisToast(null);
+      }, 7000);
+    }
+  };
+
+  // Handler for "Авто-виправлення всіх" button
+  const handleAutoFixAllPhotos = async () => {
+    setIsAutoFixingAll(true);
+    setAnalysisToast(null);
+    try {
+      const res = await fetch('/api/ai/photos/auto-fix-all', {
+        method: 'POST',
+      });
+      const data = await res.json();
+      if (onBatchUpdated) {
+        await onBatchUpdated();
+      }
+      setAnalysisToast(
+        data.fixedCount > 0
+          ? `Успішно виправлено та очищено ${data.fixedCount} фото товарів!`
+          : 'Каталог вже в ідеальному стані, всі фото чисті та відповідають товарам!'
+      );
+    } catch (e) {
+      console.error('Auto fix error:', e);
+      setAnalysisToast('Помилка під час автоматичного виправлення.');
+    } finally {
+      setIsAutoFixingAll(false);
+      setTimeout(() => {
+        setAnalysisToast(null);
+      }, 7000);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Studio Banner */}
@@ -296,19 +354,57 @@ export const AdminAiPhotoStudio: React.FC<AdminAiPhotoStudioProps> = ({
         <div className="absolute -right-10 -bottom-10 opacity-15 pointer-events-none">
           <Wand2 size={240} />
         </div>
-        <div className="relative z-10 max-w-3xl space-y-3">
-          <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-blue-250">
-            <Sparkles size={14} className="text-amber-400 animate-pulse" />
-            <span>AI Автоматизація та Аудит Зображень</span>
+        <div className="relative z-10 space-y-4">
+          <div className="max-w-3xl space-y-3">
+            <div className="inline-flex items-center gap-2 bg-white/10 backdrop-blur-md px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider text-blue-200">
+              <Sparkles size={14} className="text-amber-400 animate-pulse" />
+              <span>AI Автоматизація та Аудит Зображень</span>
+            </div>
+            <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
+              Очищення та Покращення Фотографій Товарів
+            </h2>
+            <p className="text-sm sm:text-base text-blue-100 font-medium leading-relaxed">
+              Система автоматично виявляє повторювані однакові зображення, водяні знаки маркетплейсів
+              (prom.ua, olx тощо), фотографії цілих авто замість конкретних деталей та товари без фото.
+              Ви можете в 1 клік підібрати або замінити їх на чисті студійні зображення.
+            </p>
           </div>
-          <h2 className="text-2xl sm:text-3xl font-black tracking-tight">
-            Очищення та Покращення Фотографій Товарів
-          </h2>
-          <p className="text-sm sm:text-base text-blue-100 font-medium leading-relaxed">
-            Система автоматично виявляє повторювані однакові зображення, водяні знаки маркетплейсів
-            (prom.ua, olx тощо), фотографії цілих авто замість конкретних деталей та товари без фото.
-            Ви можете в 1 клік підібрати або замінити їх на чисті студійні зображення.
-          </p>
+
+          {/* Action buttons inside the banner */}
+          <div className="pt-2 flex flex-wrap items-center gap-3">
+            <button
+              onClick={handleRunFullAnalysis}
+              disabled={isAnalyzingCatalog}
+              className="inline-flex items-center gap-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 active:scale-95 text-white font-extrabold px-6 py-3 rounded-2xl shadow-lg hover:shadow-orange-500/30 transition-all cursor-pointer text-sm sm:text-base disabled:opacity-60 disabled:cursor-not-allowed group"
+            >
+              <RefreshCw
+                size={18}
+                className={isAnalyzingCatalog ? 'animate-spin' : 'group-hover:rotate-180 transition-transform duration-500'}
+              />
+              <span>{isAnalyzingCatalog ? 'Виконується аналіз...' : 'Аналіз'}</span>
+            </button>
+
+            <button
+              onClick={handleAutoFixAllPhotos}
+              disabled={isAutoFixingAll || isAnalyzingCatalog}
+              className="inline-flex items-center gap-2 bg-white/15 hover:bg-white/25 active:scale-95 text-white font-bold px-5 py-3 rounded-2xl backdrop-blur-md border border-white/20 transition-all cursor-pointer text-sm sm:text-base disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              <Wand2 size={18} className={isAutoFixingAll ? 'animate-spin text-amber-300' : 'text-amber-300'} />
+              <span>{isAutoFixingAll ? 'Виправляємо...' : 'Авто-виправлення всіх (1 клік)'}</span>
+            </button>
+
+            {analysisToast && (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0 }}
+                className="inline-flex items-center gap-2 bg-emerald-500/25 border border-emerald-400/40 text-emerald-100 text-xs sm:text-sm font-semibold px-4 py-2.5 rounded-xl backdrop-blur-md shadow-md"
+              >
+                <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                <span>{analysisToast}</span>
+              </motion.div>
+            )}
+          </div>
         </div>
       </div>
 

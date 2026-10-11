@@ -214,24 +214,122 @@ const AppContent = () => {
         </AnimatePresence>
 
         {!isAdminRoute && (
-          <footer className="bg-white dark:bg-gray-900 border-t border-gray-100 dark:border-gray-800 py-16 transition-colors">
-            <div className="container mx-auto px-4">
-              <div className="flex flex-col md:flex-row justify-between items-center gap-8">
-                <div className="text-center md:text-left">
-                  <div className="text-2xl font-black text-gray-900 dark:text-white tracking-tight mb-2">AutoPlumb</div>
-                  <p className="text-gray-400 text-sm font-medium">© 2026 AutoPlumb. Всі права захищені.</p>
-                </div>
+          <footer className="bg-slate-900 text-slate-300 pt-16 pb-12 border-t border-slate-800 transition-colors">
+            <div className="container mx-auto px-4 max-w-7xl">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10 pb-12 border-b border-slate-800">
                 
-                <div className="flex flex-wrap justify-center gap-8 text-sm font-bold text-gray-500 dark:text-gray-400">
-                  <Link to="/legal/privacy" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Політика конфіденційності</Link>
-                  <Link to="/legal/terms" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Публічна оферта</Link>
-                  <Link to="/legal/cookies" className="hover:text-blue-600 dark:hover:text-blue-400 transition-colors">Файли Cookie</Link>
+                {/* Column 1: Store info & Direct Contacts */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-black text-white tracking-tight">AutoPlumb</span>
+                    <span className="w-2 h-2 rounded-full bg-blue-500 mb-1"></span>
+                  </div>
+                  <p className="text-xs text-slate-400 leading-relaxed">
+                    Спеціалізований інтернет-магазин запчастин для авто, тракторів МТЗ/ЮМЗ, а також систем опалення та сучасної сантехніки.
+                  </p>
+                  <div className="space-y-2 pt-2 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="text-slate-400">Гаряча лінія:</span>
+                      <a href="tel:+380689180637" className="font-bold text-white hover:text-blue-400 transition-colors">
+                        +380 68 918 0637
+                      </a>
+                    </div>
+                    <div className="text-slate-400">
+                      Графік роботи: <span className="text-slate-200">Пн–Сб: 08:30 – 19:00</span>
+                    </div>
+                    <div className="text-slate-400">
+                      Неділя: <span className="text-slate-200">прийом онлайн-замовлень</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Column 2: Catalog Quick Links */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Каталог товарів</h4>
+                  <ul className="space-y-2.5 text-xs text-slate-400">
+                    <li>
+                      <Link to="/" className="hover:text-white transition-colors">Запчастини для тракторів МТЗ / ЮМЗ</Link>
+                    </li>
+                    <li>
+                      <Link to="/" className="hover:text-white transition-colors">Акумулятори та автоелектрика</Link>
+                    </li>
+                    <li>
+                      <Link to="/" className="hover:text-white transition-colors">Автохімія, оливи та фільтри</Link>
+                    </li>
+                    <li>
+                      <Link to="/" className="hover:text-white transition-colors">Змішувачі та комплектуючі</Link>
+                    </li>
+                    <li>
+                      <Link to="/" className="hover:text-white transition-colors">Опалення, радіатори та котли</Link>
+                    </li>
+                    <li>
+                      <Link to="/" className="hover:text-white transition-colors">Труби, фітинги та крани</Link>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Column 3: Customer Service */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Покупцям</h4>
+                  <ul className="space-y-2.5 text-xs text-slate-400">
+                    <li>
+                      <Link to="/order-tracking/search" className="hover:text-white transition-colors">Відстежити замовлення</Link>
+                    </li>
+                    <li>
+                      <Link to="/legal/terms" className="hover:text-white transition-colors">Доставка та оплата</Link>
+                    </li>
+                    <li>
+                      <Link to="/legal/terms" className="hover:text-white transition-colors">Обмін та повернення 14 днів</Link>
+                    </li>
+                    <li>
+                      <Link to="/legal/privacy" className="hover:text-white transition-colors">Політика конфіденційності</Link>
+                    </li>
+                    <li>
+                      <Link to="/legal/terms" className="hover:text-white transition-colors">Публічна оферта</Link>
+                    </li>
+                    <li>
+                      <Link to="/blog" className="hover:text-white transition-colors">Корисні статті та поради</Link>
+                    </li>
+                  </ul>
+                </div>
+
+                {/* Column 4: Shipping & Payment Guarantees */}
+                <div className="space-y-4">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">Доставка та оплата</h4>
+                  <div className="space-y-3 text-xs text-slate-400">
+                    <p className="leading-relaxed">
+                      Відправляємо замовлення щодня по всій території України службою <strong>Нова Пошта</strong>.
+                    </p>
+                    <div className="p-3 bg-slate-800/80 rounded-lg border border-slate-700/60 space-y-1.5">
+                      <div className="font-semibold text-slate-200">Оплата при отриманні:</div>
+                      <div className="text-[11px] text-slate-400">
+                        Перевіряйте товар у відділенні пошти перед оплатою (накладений платіж).
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-slate-400">
+                      <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700">Нова Пошта</span>
+                      <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700">Накладений платіж</span>
+                      <span className="px-2 py-1 bg-slate-800 rounded border border-slate-700">Visa / Mastercard</span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* Bottom bar */}
+              <div className="pt-8 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs text-slate-500">
+                <div>
+                  © 2026 AutoPlumb. Офіційний інтернет-магазин запчастин та сантехніки. Всі права захищено.
+                </div>
+                <div className="flex items-center gap-6">
+                  <Link to="/legal/privacy" className="hover:text-slate-300 transition-colors">Конфіденційність</Link>
+                  <Link to="/legal/terms" className="hover:text-slate-300 transition-colors">Оферта</Link>
+                  <Link to="/legal/cookies" className="hover:text-slate-300 transition-colors">Cookie</Link>
                 </div>
               </div>
             </div>
           </footer>
         )}
-        {!isAdminRoute && <WelcomeModal />}
         {!isAdminRoute && <CustomerChatWidget />}
     </div>
   );

@@ -2,6 +2,7 @@ import React from 'react';
 import { X, Minus, Plus, ShoppingBag } from 'lucide-react';
 import { useCart } from '../context/CartContext';
 import { motion, AnimatePresence } from 'motion/react';
+import { getCuratedFallback } from '../services/productImageService';
 
 export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void; onCheckout: () => void }> = ({ isOpen, onClose, onCheckout }) => {
   const { items, removeItem, updateQuantity, total } = useCart();
@@ -59,7 +60,18 @@ export const CartDrawer: React.FC<{ isOpen: boolean; onClose: () => void; onChec
                 items.map(item => (
                   <div key={item.id} className="flex space-x-4">
                     <div className="w-20 h-20 bg-gray-50 dark:bg-gray-800 rounded-xl overflow-hidden flex-shrink-0">
-                      <img src={`https://picsum.photos/seed/${item.id}/200/200`} alt={item.name} className="w-full h-full object-cover" />
+                      <img 
+                        src={item.image || getCuratedFallback(item.name, 'auto', '', item.id)} 
+                        alt={item.name} 
+                        className="w-full h-full object-contain p-1"
+                        referrerPolicy="no-referrer"
+                        onError={(e) => {
+                          const fallback = getCuratedFallback(item.name, 'auto', '', item.id);
+                          if (e.currentTarget.src !== fallback) {
+                            e.currentTarget.src = fallback;
+                          }
+                        }}
+                      />
                     </div>
                     <div className="flex-1">
                       <h4 className="font-bold text-gray-900 dark:text-white mb-1">{item.name}</h4>

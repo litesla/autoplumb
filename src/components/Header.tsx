@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ShoppingCart, User, Menu, ChevronDown, Phone, MessageSquare, Tag, Percent, Sparkles, LogOut, Settings, X, ArrowRight, Heart, Moon, Sun, SlidersHorizontal } from 'lucide-react';
+import { Search, ShoppingCart, User, Menu, ChevronDown, Phone, MessageSquare, Tag, Percent, Sparkles, LogOut, Settings, X, ArrowRight, Heart, Moon, Sun, SlidersHorizontal, Truck, Clock } from 'lucide-react';
 import { useShop } from '../context/ShopContext';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
@@ -11,8 +11,10 @@ import { signOut } from 'firebase/auth';
 import { useAuth } from '../context/AuthContext';
 import { Product, getExpandedSearchTerms, getSearchKeywords } from '../lib/utils';
 import { supabase } from '../lib/supabaseClient';
+import { getSanitizedProductImage, getCuratedFallback } from '../services/productImageService';
 
-const getFirstProductImage = (imgStr?: string) => {
+const getFirstProductImage = (imgStr?: string, product?: any) => {
+  if (product) return getSanitizedProductImage(product);
   if (!imgStr) return '';
   const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
   return parts[0]?.trim() || '';
@@ -195,11 +197,42 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
 
   return (
     <>
-      <header ref={headerRef} className="z-[100] w-full bg-white/70 dark:bg-black/70 backdrop-blur-2xl border-b border-gray-100/50 dark:border-gray-800/50 transition-all duration-500">
+      {/* Top Utility Bar */}
+      <div className="hidden lg:block bg-slate-900 text-slate-300 text-xs py-2 border-b border-slate-800">
+        <div className="container mx-auto px-4 flex items-center justify-between">
+          <div className="flex items-center gap-6">
+            <span className="flex items-center gap-1.5 text-slate-400">
+              <Clock size={13} className="text-blue-400" />
+              <span>Графік: <strong className="text-slate-200">Пн–Сб 08:30 – 19:00</strong></span>
+            </span>
+            <span className="flex items-center gap-1.5 text-slate-400">
+              <Truck size={13} className="text-emerald-400" />
+              <span>Відправка Новою Поштою щодня по всій Україні</span>
+            </span>
+          </div>
+          <div className="flex items-center gap-6 text-slate-400">
+            <Link to="/order-tracking/search" className="hover:text-white transition-colors">
+              Відстежити замовлення
+            </Link>
+            <Link to="/blog" className="hover:text-white transition-colors">
+              Блог та поради
+            </Link>
+            <a 
+              href="tel:+380689180637" 
+              className="font-bold text-white hover:text-blue-400 transition-colors flex items-center gap-1.5"
+            >
+              <Phone size={12} className="text-blue-400" />
+              <span>+380 68 918 0637</span>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <header ref={headerRef} className="z-[100] w-full bg-white/90 dark:bg-zinc-950/90 backdrop-blur-md border-b border-slate-200/80 dark:border-zinc-800 transition-all duration-300">
       <div className="container mx-auto px-4 h-16 md:h-20 flex items-center justify-between gap-2 sm:gap-4">
-        <Link to="/" onClick={() => { setSelectedCategory(null); setSearchQuery(''); }} className="flex flex-col group shrink-0">
-          <span className="text-lg sm:text-xl md:text-2xl font-black text-gray-900 dark:text-white tracking-tighter leading-none">AutoPlumb</span>
-          <span className="text-[7px] sm:text-[8px] md:text-[10px] font-black uppercase tracking-[0.15em] text-blue-600 dark:text-blue-400 leading-none mt-1">Premium Store</span>
+        <Link to="/" onClick={() => { setSelectedCategory(null); setSearchQuery(''); }} className="flex items-center gap-1.5 group shrink-0">
+          <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">AutoPlumb</span>
+          <span className="w-2 h-2 rounded-full bg-blue-600 mb-1"></span>
         </Link>
 
         <nav className="hidden md:flex items-center space-x-1">
@@ -371,7 +404,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setShowSuggestions(true)}
               onKeyDown={handleKeyDown}
-              placeholder="Пошук товарів за назвою або брендом..."
+              placeholder="Пошук товарів за назвою, брендом або артикулом..."
               className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus:border-blue-500/20 rounded-2xl py-2.5 pl-12 pr-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/5 transition-all dark:text-white"
             />
             
@@ -399,10 +432,16 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                         >
                           <div className="w-14 h-14 bg-gray-100 dark:bg-gray-800 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-700">
                             <img 
-                              src={getFirstProductImage(product.image) || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
+                              src={getFirstProductImage(product.image, product)} 
                               alt={product.name}
                               className="w-full h-full object-cover group-hover:scale-110 transition-transform"
                               referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                const fallback = getCuratedFallback(product.name, product.type, product.category, product.id);
+                                if (e.currentTarget.src !== fallback) {
+                                  e.currentTarget.src = fallback;
+                                }
+                              }}
                             />
                           </div>
                           <div className="flex-1 min-w-0">
@@ -754,7 +793,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Пошук за назвою або брендом..."
+                    placeholder="Пошук за назвою, брендом або артикулом..."
                     className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus:border-blue-500/20 rounded-2xl py-3 pl-12 pr-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/5 transition-all dark:text-white"
                   />
                 </div>
@@ -779,10 +818,16 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
                       >
                         <div className="w-14 h-14 bg-white dark:bg-gray-900 rounded-xl overflow-hidden flex-shrink-0 border border-gray-100 dark:border-gray-800">
                           <img 
-                            src={getFirstProductImage(product.image) || `https://via.placeholder.com/100?text=${encodeURIComponent(product.name)}`} 
+                            src={getFirstProductImage(product.image, product)} 
                             alt={product.name}
                             className="w-full h-full object-cover"
                             referrerPolicy="no-referrer"
+                            onError={(e) => {
+                              const fallback = getCuratedFallback(product.name, product.type, product.category, product.id);
+                              if (e.currentTarget.src !== fallback) {
+                                e.currentTarget.src = fallback;
+                              }
+                            }}
                           />
                         </div>
                         <div className="flex-1 min-w-0">

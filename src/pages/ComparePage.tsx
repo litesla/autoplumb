@@ -5,8 +5,10 @@ import { useCart } from '../context/CartContext';
 import { ArrowLeft, X, ShoppingBag, Scale, Trash2 } from 'lucide-react';
 import { useNavigate, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'motion/react';
+import { getSanitizedProductImage, getCuratedFallback } from '../services/productImageService';
 
-const getFirstProductImage = (imgStr?: string) => {
+const getFirstProductImage = (imgStr?: string, product?: any) => {
+  if (product) return getSanitizedProductImage(product);
   if (!imgStr) return '';
   const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
   return parts[0]?.trim() || '';
@@ -86,10 +88,16 @@ export const ComparePage: React.FC = () => {
                           <Link to={`/product/${product.id}`} className="block group/item">
                             <div className="aspect-square bg-gray-50 rounded-2xl mb-4 overflow-hidden">
                               <img 
-                                src={getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/400/400`} 
+                                src={getFirstProductImage(product.image, product)} 
                                 alt={product.name}
                                 className="w-full h-full object-cover group-hover/item:scale-110 transition-transform duration-500"
                                 referrerPolicy="no-referrer"
+                                onError={(e) => {
+                                  const fallback = getCuratedFallback(product.name, product.type, product.category, product.id);
+                                  if (e.currentTarget.src !== fallback) {
+                                    e.currentTarget.src = fallback;
+                                  }
+                                }}
                               />
                             </div>
                             <div className="text-[10px] font-black uppercase tracking-widest text-blue-500 mb-1">{product.brand}</div>

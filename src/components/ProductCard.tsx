@@ -1,9 +1,9 @@
-import React from 'react';
-import { ShoppingCart } from 'lucide-react';
+import React, { useState } from 'react';
+import { ShoppingCart, Check, Package } from 'lucide-react';
 import { Product, triggerFlyToCart } from '../lib/utils';
 import { useCart } from '../context/CartContext';
 import { useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
+import { getSanitizedProductImage, getCuratedFallback } from '../services/productImageService';
 
 interface ProductCardProps {
   product: Product;
@@ -13,15 +13,17 @@ interface ProductCardProps {
 export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons = true }) => {
   const { addItem } = useCart();
   const navigate = useNavigate();
+  const initialImage = getSanitizedProductImage(product);
+  const [currentImg, setCurrentImg] = useState(initialImage);
+  const [hasFailed, setHasFailed] = useState(false);
 
-  const getFirstProductImage = (imgStr?: string) => {
-    if (!imgStr) return '';
-    const parts = imgStr.split(/,(?=\s*(?:https?:|data:))/i);
-    return parts[0]?.trim() || '';
-  };
+  // Sync state if product changes
+  React.useEffect(() => {
+    setCurrentImg(getSanitizedProductImage(product));
+    setHasFailed(false);
+  }, [product.id, product.image, product.image_url]);
 
   const handleCardClick = (e: React.MouseEvent) => {
-    // Navigate to product page unless a button or its child was clicked
     if (!(e.target as HTMLElement).closest('button')) {
       navigate(`/product/${product.id}`);
     }
@@ -30,82 +32,91 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    const cleanImg = getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/400/400`;
-    triggerFlyToCart(cleanImg, e);
-    addItem(product);
+    triggerFlyToCart(currentImg, e);
+    addItem({ ...product, image: currentImg });
   };
 
+  const handleImageError = () => {
+    if (!hasFailed) {
+      setHasFailed(true);
+      const fallback = getCuratedFallback(product.name, product.type, product.category, product.id);
+      setCurrentImg(fallback);
+    }
+  };
+
+  const isInStock = (product.stock === undefined || product.stock > 0);
+
   return (
-    <motion.div 
+    <div 
       onClick={handleCardClick}
-      whileHover={{ 
-        scale: 1.025,
-        y: -6,
-        boxShadow: "0 25px 50px -12px rgba(59, 130, 246, 0.15)"
-      }}
-      transition={{ type: "spring", stiffness: 400, damping: 25 }}
-      className="group bg-white dark:bg-gray-900 rounded-2xl border border-gray-100 dark:border-gray-800 overflow-hidden transition-all duration-300 h-full flex flex-col cursor-pointer"
+      className="group bg-white dark:bg-zinc-900 rounded-xl border border-slate-200/80 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:shadow-md transition-all duration-200 h-full flex flex-col cursor-pointer overflow-hidden"
     >
-      <div className="aspect-square bg-gray-50 dark:bg-gray-800 relative overflow-hidden shrink-0">
-        <img
-          src={getFirstProductImage(product.image) || `https://picsum.photos/seed/${product.id}/400/400`}
-          alt={product.name}
-          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          referrerPolicy="no-referrer"
-        />
-        <div className="absolute top-4 left-4">
-          <span className="px-3 py-1 bg-white/90 dark:bg-gray-900/90 backdrop-blur-sm text-[10px] font-bold uppercase tracking-wider dark:text-white rounded-full shadow-sm">
-            {product.category}
-          </span>
-        </div>
-      </div>
-      
-      <div className="p-3 md:p-6 flex flex-col flex-1">
-        {product.brand && (
-          <div className="text-[8px] md:text-[10px] font-black uppercase tracking-widest text-blue-600/60 dark:text-blue-400/60 mb-1">
-            {product.brand}
+      {/* Product Image Container */}
+      <div className="aspect-square bg-slate-50 dark:bg-zinc-800/50 relative overflow-hidden flex items-center justify-center p-3 border-b border-slate-100 dark:border-zinc-800/60">
+        {currentImg ? (
+          <img
+            src={currentImg}
+            alt={product.name}
+            className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={handleImageError}
+          />
+        ) : (
+          <div className="flex flex-col items-center justify-center text-slate-300 dark:text-zinc-600 gap-1">
+            <Package size={36} strokeWidth={1.5} />
+            <span className="text-[11px]">Фото деталі</span>
           </div>
         )}
-        <h3 className="text-sm md:text-lg font-bold text-gray-900 dark:text-white mb-2 md:mb-3 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-tight md:leading-snug min-h-[2.5rem] md:min-h-[3.5rem]">
-          {product.name}
-        </h3>
-        <div className="flex items-center justify-between mt-auto gap-2">
-          <div className="text-base md:text-xl font-black text-gray-900 dark:text-white shrink-0">
-            {product.price.toLocaleString()} <span className="text-[10px] md:text-xs">грн</span>
+      </div>
+      
+      {/* Product Body */}
+      <div className="p-3.5 sm:p-4 flex flex-col flex-1 justify-between gap-2.5">
+        <div>
+          {/* Metadata line: Unboxed text with dot separators */}
+          <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400 mb-1.5 font-medium">
+            <div className="flex items-center gap-1.5 truncate">
+              {product.brand && <span className="font-semibold text-slate-700 dark:text-zinc-300 uppercase tracking-wider">{product.brand}</span>}
+              {product.brand && product.article && <span aria-hidden="true">·</span>}
+              {product.article && <span className="tabular-nums">Арт. {product.article}</span>}
+            </div>
+            
+            {isInStock ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 dark:text-emerald-400 shrink-0">
+                <Check size={12} strokeWidth={2.5} />
+                <span>В наявності</span>
+              </span>
+            ) : (
+              <span className="text-[11px] font-medium text-amber-600 dark:text-amber-400 shrink-0">
+                Під замовлення
+              </span>
+            )}
+          </div>
+
+          {/* Product Title */}
+          <h3 className="text-sm font-semibold text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2 leading-snug">
+            {product.name}
+          </h3>
+        </div>
+
+        {/* Pricing and Action row */}
+        <div className="pt-2 border-t border-slate-100 dark:border-zinc-800/80 flex items-center justify-between gap-2 mt-auto">
+          <div>
+            <div className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
+              {product.price.toLocaleString('uk-UA')} <span className="text-xs font-normal text-slate-500 dark:text-zinc-400">грн</span>
+            </div>
           </div>
           
           <button 
             onClick={handleAddToCart}
-            className="p-3 md:p-2.5 bg-blue-600 text-white md:bg-gray-50 md:dark:bg-gray-800 md:text-gray-900 md:dark:text-white rounded-xl active:scale-90 transition-all shadow-lg shadow-blue-600/20 md:shadow-none hover:bg-blue-700 md:hover:bg-blue-100 md:dark:hover:bg-blue-900/50 cursor-pointer"
+            aria-label="Додати в кошик"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-sm"
           >
-            <ShoppingCart size={20} className="md:hidden" />
-            <ShoppingCart size={18} className="hidden md:block" />
+            <ShoppingCart size={15} />
+            <span className="hidden sm:inline">Купити</span>
           </button>
         </div>
-        
-        {showButtons && (
-          <div className="hidden md:grid grid-cols-2 gap-3 mt-4">
-            <button 
-              onClick={handleAddToCart}
-              className="flex items-center justify-center space-x-2 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold transition-colors cursor-pointer active:scale-95"
-            >
-              <ShoppingCart size={18} />
-              <span>В кошик</span>
-            </button>
-            <button 
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                addItem(product);
-                navigate('/checkout');
-              }}
-              className="bg-gray-50 dark:bg-gray-800 text-gray-900 dark:text-white py-3 rounded-xl font-bold hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors cursor-pointer active:scale-95"
-            >
-              Замовити
-            </button>
-          </div>
-        )}
       </div>
-    </motion.div>
+    </div>
   );
 };

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabaseClient';
 import { Product } from '../lib/utils';
+import { getSanitizedProductGallery, getCuratedFallback } from '../services/productImageService';
 import { useCart } from '../context/CartContext';
 import { ShoppingCart, ChevronLeft, ChevronRight, ArrowLeft, Package, ShieldCheck, Truck, Sparkles } from 'lucide-react';
 import { motion } from 'motion/react';
@@ -83,33 +84,19 @@ const ProductPage: React.FC = () => {
     );
   }
 
-  // Helper to get all images for a product
+  // Helper to get clean, high-resolution images for a product
   const getProductImages = (prod: Product) => {
-    let list: string[] = [];
-    
-    // Check if images array exists (from newer implementations)
-    if (prod.images && Array.isArray(prod.images) && prod.images.length > 0) {
-      list = prod.images;
-    } 
-    // Check if image property exists
-    else if (prod.image) {
-      // Check if it's potentially a comma-separated list
-      if (prod.image.includes(',')) {
-        list = prod.image.split(/,(?=\s*(?:https?:|data:))/i).map(s => s.trim()).filter(Boolean);
-      } else {
-        list = [prod.image];
-      }
-    }
-
-    // Fallback if still empty
-    if (list.length === 0) {
-      list = [`https://picsum.photos/seed/${prod.id}/800/800`];
-    }
-
-    return list;
+    return getSanitizedProductGallery(prod);
   };
 
   const images = getProductImages(product);
+
+  const handleMainImageError = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const fallback = getCuratedFallback(product?.name || '', product?.type || 'auto', product?.category || '', product?.id || '');
+    if (e.currentTarget.src !== fallback) {
+      e.currentTarget.src = fallback;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-black flex flex-col transition-colors">
@@ -135,6 +122,7 @@ const ProductPage: React.FC = () => {
                 alt={product.name} 
                 className="w-full h-full object-cover"
                 referrerPolicy="no-referrer"
+                onError={handleMainImageError}
               />
               
               <button 
