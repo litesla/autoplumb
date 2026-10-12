@@ -87,6 +87,7 @@ export interface Product {
   specs?: string;
   rating?: number;
   reviewCount?: number;
+  reviews?: number;
 }
 
 export interface OrderItem {

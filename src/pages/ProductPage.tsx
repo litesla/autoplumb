@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Product } from '../lib/utils';
 import { getSanitizedProductGallery, getCuratedFallback } from '../services/productImageService';
 import { useCart } from '../context/CartContext';
-import { ShoppingCart, ChevronLeft, ChevronRight, ArrowLeft, Package, ShieldCheck, Truck, Sparkles } from 'lucide-react';
+import { ShoppingCart, ChevronLeft, ChevronRight, ArrowLeft, Package, ShieldCheck, Truck } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ProductCard } from '../components/ProductCard';
 import { ProductReviews } from '../components/ProductReviews';
@@ -47,6 +47,7 @@ const ProductPage: React.FC = () => {
           .select('*')
           .eq('category', category)
           .neq('id', currentId)
+          .order('created_at', { ascending: false })
           .limit(12);
         
         if (data) {
@@ -100,74 +101,76 @@ const ProductPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-black flex flex-col transition-colors">
-      <main className="flex-1 pt-24 pb-12">
+      <main className="flex-1 pt-16 sm:pt-20 pb-24 md:pb-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           {/* Breadcrumbs / Back button */}
           <button 
             onClick={() => navigate(-1)}
-            className="flex items-center space-x-2 text-gray-500 dark:text-gray-400 hover:text-blue-600 transition-colors mb-8 group"
+            className="flex items-center space-x-2 text-gray-500 dark:text-gray-400 hover:text-blue-600 transition-colors mb-6 group cursor-pointer"
           >
-            <ArrowLeft size={20} className="group-hover:-translate-x-1 transition-transform" />
-            <span className="font-medium">Назад</span>
+            <ArrowLeft size={18} className="group-hover:-translate-x-1 transition-transform" />
+            <span className="font-medium text-sm">Назад</span>
           </button>
 
-          <div className="bg-white dark:bg-gray-900 rounded-[40px] shadow-xl shadow-gray-200/50 dark:shadow-none overflow-hidden flex flex-col lg:flex-row border border-transparent dark:border-gray-800">
+          <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-sm overflow-hidden flex flex-col lg:flex-row border border-slate-200/80 dark:border-zinc-800">
             {/* Image Gallery */}
-            <div className="lg:w-1/2 relative bg-gray-50 dark:bg-gray-800 flex items-center justify-center group min-h-[400px] lg:min-h-[600px]">
+            <div className="lg:w-1/2 relative bg-slate-50 dark:bg-zinc-800/40 flex items-center justify-center group min-h-[300px] sm:min-h-[400px] lg:min-h-[500px]">
               <motion.img 
                 key={currentImage}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 src={images[currentImage]} 
                 alt={product.name} 
-                className="w-full h-full object-cover"
+                className="w-full h-full object-contain p-6 max-h-[400px] lg:max-h-[500px]"
                 referrerPolicy="no-referrer"
                 onError={handleMainImageError}
               />
               
               <button 
                 onClick={() => setCurrentImage(prev => (prev === 0 ? images.length - 1 : prev - 1))}
-                className="absolute left-6 top-1/2 -translate-y-1/2 p-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-full shadow-lg hover:bg-white dark:hover:bg-gray-700 transition-all active:scale-90 text-gray-900 dark:text-white"
+                className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 p-2 sm:p-3 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md rounded-full shadow-md hover:bg-white dark:hover:bg-zinc-700 transition-all active:scale-90 text-gray-900 dark:text-white"
+                aria-label="Попереднє фото"
               >
-                <ChevronLeft size={24} />
+                <ChevronLeft size={20} />
               </button>
               <button 
                 onClick={() => setCurrentImage(prev => (prev === images.length - 1 ? 0 : prev + 1))}
-                className="absolute right-6 top-1/2 -translate-y-1/2 p-3 bg-white/90 dark:bg-gray-800/90 backdrop-blur-md rounded-full shadow-lg hover:bg-white dark:hover:bg-gray-700 transition-all active:scale-90 text-gray-900 dark:text-white"
+                className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 p-2 sm:p-3 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md rounded-full shadow-md hover:bg-white dark:hover:bg-zinc-700 transition-all active:scale-90 text-gray-900 dark:text-white"
+                aria-label="Наступне фото"
               >
-                <ChevronRight size={24} />
+                <ChevronRight size={20} />
               </button>
 
-              <div className="absolute bottom-8 left-1/2 -translate-x-1/2 flex space-x-3">
+              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-2">
                 {images.map((_, i) => (
                   <button 
                     key={i}
                     onClick={() => setCurrentImage(i)}
-                    className={`w-2.5 h-2.5 rounded-full transition-all duration-300 ${currentImage === i ? 'bg-blue-600 w-8' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'}`}
+                    className={`w-2 h-2 rounded-full transition-all duration-300 ${currentImage === i ? 'bg-blue-600 w-6' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'}`}
                   />
                 ))}
               </div>
             </div>
 
             {/* Product Info */}
-            <div className="lg:w-1/2 p-8 lg:p-16 flex flex-col">
-              <div className="mb-8">
-                <div className="flex items-center space-x-3 mb-4">
-                  <span className="px-4 py-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[10px] font-bold uppercase tracking-wider rounded-full">
+            <div className="lg:w-1/2 p-5 sm:p-8 lg:p-12 flex flex-col">
+              <div className="mb-6">
+                <div className="flex items-center space-x-2.5 mb-3">
+                  <span className="px-3 py-1 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 text-[11px] font-bold uppercase tracking-wider rounded-lg">
                     {product.category}
                   </span>
                   {product.brand && (
-                    <span className="text-xs font-black text-blue-500 uppercase tracking-widest">
+                    <span className="text-xs font-black text-slate-700 dark:text-zinc-300 uppercase tracking-wider">
                       {product.brand}
                     </span>
                   )}
                 </div>
-                <h1 className="text-3xl lg:text-5xl font-black text-gray-900 dark:text-white leading-tight mb-4">
+                <h1 className="text-2xl sm:text-3xl lg:text-4xl font-extrabold text-slate-900 dark:text-white leading-tight mb-3">
                   {product.name}
                 </h1>
-                <div className="flex items-center space-x-4 text-sm font-medium text-gray-500 dark:text-gray-400">
+                <div className="flex items-center space-x-3 text-xs font-medium text-slate-500 dark:text-zinc-400">
                   <div className="flex items-center space-x-1.5">
-                    <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" />
+                    <span className="w-2 h-2 bg-emerald-500 rounded-full" />
                     <span className="text-emerald-600 dark:text-emerald-400 font-bold">В наявності</span>
                   </div>
                   <span>•</span>
@@ -175,44 +178,44 @@ const ProductPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="text-5xl font-black text-blue-600 dark:text-blue-400 mb-10">
-                {product.price.toLocaleString()} грн
+              <div className="text-3xl sm:text-4xl font-extrabold text-slate-900 dark:text-white mb-6 tabular-nums tracking-tight">
+                {product.price.toLocaleString('uk-UA')} <span className="text-lg font-normal text-slate-500">грн</span>
               </div>
 
-              <div className="flex-1 mb-10">
-                <h4 className="font-bold text-gray-900 dark:text-white mb-4 flex items-center space-x-2">
-                  <Package size={20} className="text-blue-600" />
+              <div className="flex-1 mb-6">
+                <h4 className="font-bold text-slate-900 dark:text-white mb-2 flex items-center space-x-2 text-sm">
+                  <Package size={17} className="text-blue-600" />
                   <span>Опис товару</span>
                 </h4>
-                <div className="text-gray-600 dark:text-gray-400 leading-relaxed whitespace-pre-line text-lg">
-                  {product.description || "Цей товар забезпечує високу якість та надійність. Ідеально підходить для професійного використання та домашніх потреб. Виготовлений з використанням сучасних технологій та матеріалів."}
+                <div className="text-slate-600 dark:text-zinc-400 leading-relaxed whitespace-pre-line text-sm sm:text-base">
+                  {product.description || "Оригінальна заводська деталь. Відповідає європейським стандартам якості та надійності. Швидка відправка по Україні."}
                 </div>
               </div>
 
               {/* Trust badges */}
-              <div className="grid grid-cols-2 gap-4 mb-10">
-                <div className="flex items-center space-x-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl">
-                  <ShieldCheck className="text-blue-600 dark:text-blue-400" size={24} />
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="flex items-center space-x-2.5 p-3 bg-slate-50 dark:bg-zinc-800/50 rounded-xl">
+                  <ShieldCheck className="text-blue-600 dark:text-blue-400 shrink-0" size={20} />
                   <div className="text-xs">
-                    <div className="font-bold text-gray-900 dark:text-white">Гарантія якості</div>
-                    <div className="text-gray-500 dark:text-gray-400">100% оригінал</div>
+                    <div className="font-bold text-slate-900 dark:text-white">Гарантія якості</div>
+                    <div className="text-slate-500 dark:text-zinc-400 text-[11px]">100% оригінал</div>
                   </div>
                 </div>
-                <div className="flex items-center space-x-3 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl">
-                  <Truck className="text-blue-600 dark:text-blue-400" size={24} />
+                <div className="flex items-center space-x-2.5 p-3 bg-slate-50 dark:bg-zinc-800/50 rounded-xl">
+                  <Truck className="text-blue-600 dark:text-blue-400 shrink-0" size={20} />
                   <div className="text-xs">
-                    <div className="font-bold text-gray-900 dark:text-white">Швидка доставка</div>
-                    <div className="text-gray-500 dark:text-gray-400">По всій Україні</div>
+                    <div className="font-bold text-slate-900 dark:text-white">Швидка доставка</div>
+                    <div className="text-slate-500 dark:text-zinc-400 text-[11px]">Нова Пошта 1–2 дні</div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-4">
+              <div className="flex flex-col sm:flex-row gap-3">
                 <button 
                   onClick={() => addItem(product)}
-                  className="flex-1 bg-blue-600 text-white py-5 rounded-2xl font-black text-xl shadow-xl shadow-blue-600/20 hover:bg-blue-700 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center space-x-3"
+                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3.5 sm:py-4 rounded-xl font-bold text-sm sm:text-base shadow-md shadow-blue-600/20 active:scale-[0.98] transition-all flex items-center justify-center space-x-2 cursor-pointer"
                 >
-                  <ShoppingCart size={24} />
+                  <ShoppingCart size={18} />
                   <span>Додати до кошика</span>
                 </button>
                 <button 
@@ -220,7 +223,7 @@ const ProductPage: React.FC = () => {
                     addItem(product);
                     navigate('/checkout');
                   }}
-                  className="flex-1 bg-gray-900 text-white py-5 rounded-2xl font-black text-xl hover:bg-black hover:scale-[1.02] active:scale-[0.98] transition-all"
+                  className="flex-1 bg-slate-900 hover:bg-slate-800 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-white py-3.5 sm:py-4 rounded-xl font-bold text-sm sm:text-base active:scale-[0.98] transition-all cursor-pointer"
                 >
                   Купити зараз
                 </button>
@@ -230,14 +233,10 @@ const ProductPage: React.FC = () => {
 
           {/* Recommended Products */}
           {recommendedProducts.length > 0 && (
-            <div className="mt-24">
-              <div className="flex items-center justify-between mb-12">
+            <div className="mt-12 sm:mt-16">
+              <div className="flex items-center justify-between mb-6">
                 <div>
-                  <div className="flex items-center space-x-2 text-blue-600 dark:text-blue-400 mb-2">
-                    <Sparkles size={20} />
-                    <span className="text-xs font-black uppercase tracking-widest">Рекомендовано</span>
-                  </div>
-                  <h2 className="text-4xl font-black text-gray-900 dark:text-white tracking-tight">
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
                     Схожі товари
                   </h2>
                 </div>

@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShop } from '../context/ShopContext';
-import { X, Filter, ChevronDown } from 'lucide-react';
+import { X, Filter, Check, RotateCcw } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface FilterSidebarProps {
@@ -12,6 +12,10 @@ interface FilterSidebarProps {
 export const FilterSidebar: React.FC<FilterSidebarProps> = ({ isOpen, onClose, availableBrands }) => {
   const { priceRange, setPriceRange, selectedBrands, setSelectedBrands, resetFilters } = useShop();
 
+  const handlePricePreset = (min: number, max: number) => {
+    setPriceRange([min, max]);
+  };
+
   return (
     <>
       <AnimatePresence>
@@ -22,49 +26,117 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({ isOpen, onClose, a
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={onClose}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[100]"
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[120]"
             />
             <motion.div
               initial={{ x: '100%' }}
               animate={{ x: 0 }}
               exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed right-0 top-0 h-full w-full md:max-w-[320px] bg-white dark:bg-gray-900 shadow-2xl z-[110] flex flex-col border-l border-gray-100 dark:border-gray-800"
+              transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+              className="fixed right-0 top-0 h-full w-full max-w-[340px] sm:max-w-[380px] bg-white dark:bg-zinc-900 shadow-2xl z-[130] flex flex-col border-l border-slate-200 dark:border-zinc-800"
             >
-              <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+              {/* Header */}
+              <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between">
                 <div className="flex items-center space-x-2">
-                  <Filter size={20} className="text-blue-600 dark:text-blue-400" />
-                  <span className="text-xl font-black text-gray-900 dark:text-white">Фільтри</span>
+                  <div className="p-2 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-xl">
+                    <Filter size={18} />
+                  </div>
+                  <div>
+                    <span className="text-lg font-extrabold text-slate-900 dark:text-white">Фільтри</span>
+                    {(selectedBrands.length > 0 || priceRange[0] > 0 || priceRange[1] < 50000) && (
+                      <span className="ml-2 text-xs font-bold text-blue-600 dark:text-blue-400">
+                        • активні
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <button onClick={onClose} className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors dark:text-gray-400">
+                <button 
+                  onClick={onClose} 
+                  className="p-2.5 text-slate-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
+                  aria-label="Закрити фільтри"
+                >
                   <X size={20} />
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-white dark:bg-gray-900">
-                {/* Ціна */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Ціна (грн)</h3>
-                  <div className="grid grid-cols-2 gap-4">
+              {/* Scrollable Body */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-6">
+                {/* Price Filter */}
+                <div className="space-y-3">
+                  <h3 className="text-xs font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
+                    Ціна (грн)
+                  </h3>
+
+                  {/* Quick price chips */}
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => handlePricePreset(0, 500)}
+                      className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold border transition-all text-center ${
+                        priceRange[0] === 0 && priceRange[1] === 500
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-slate-300'
+                      }`}
+                    >
+                      До 500 ₴
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePricePreset(500, 1500)}
+                      className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold border transition-all text-center ${
+                        priceRange[0] === 500 && priceRange[1] === 1500
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-slate-300'
+                      }`}
+                    >
+                      500 – 1 500 ₴
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePricePreset(1500, 5000)}
+                      className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold border transition-all text-center ${
+                        priceRange[0] === 1500 && priceRange[1] === 5000
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-slate-300'
+                      }`}
+                    >
+                      1 500 – 5 000 ₴
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handlePricePreset(0, 50000)}
+                      className={`py-1.5 px-2.5 rounded-lg text-xs font-semibold border transition-all text-center ${
+                        priceRange[0] === 0 && priceRange[1] === 50000
+                          ? 'bg-blue-600 text-white border-blue-600'
+                          : 'bg-slate-50 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border-slate-200 dark:border-zinc-700 hover:border-slate-300'
+                      }`}
+                    >
+                      Всі ціни
+                    </button>
+                  </div>
+
+                  {/* Manual inputs */}
+                  <div className="grid grid-cols-2 gap-3 pt-1">
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">Від</label>
+                      <label className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">Від (грн)</label>
                       <input 
                         type="number" 
                         value={priceRange[0]}
-                        onChange={(e) => setPriceRange([Number(e.target.value), priceRange[1]])}
-                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-sm font-bold dark:text-white"
+                        onChange={(e) => setPriceRange([Math.max(0, Number(e.target.value)), priceRange[1]])}
+                        className="w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
                       />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase">До</label>
+                      <label className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">До (грн)</label>
                       <input 
                         type="number" 
                         value={priceRange[1]}
-                        onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value)])}
-                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-3 py-2 text-sm font-bold dark:text-white"
+                        onChange={(e) => setPriceRange([priceRange[0], Math.max(0, Number(e.target.value))])}
+                        className="w-full bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl px-3 py-2 text-sm font-bold text-slate-900 dark:text-white focus:outline-none focus:border-blue-500"
                       />
                     </div>
                   </div>
+
                   <input 
                     type="range" 
                     min="0" 
@@ -72,50 +144,65 @@ export const FilterSidebar: React.FC<FilterSidebarProps> = ({ isOpen, onClose, a
                     step="100"
                     value={priceRange[1]}
                     onChange={(e) => setPriceRange([priceRange[0], Number(e.target.value)])}
-                    className="w-full h-2 bg-gray-100 dark:bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-600 dark:accent-blue-400"
+                    className="w-full h-2 bg-slate-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-blue-600"
                   />
                 </div>
 
-                {/* Бренди */}
-                <div className="space-y-4">
-                  <h3 className="text-sm font-black text-gray-400 dark:text-gray-500 uppercase tracking-widest">Бренди</h3>
-                  <div className="space-y-2">
-                    {availableBrands.map(brand => (
-                      <label key={brand} className="flex items-center space-x-3 cursor-pointer group">
-                        <div className="relative flex items-center">
-                          <input 
-                            type="checkbox" 
-                            checked={selectedBrands.includes(brand)}
-                            onChange={() => {
-                              if (selectedBrands.includes(brand)) {
-                                setSelectedBrands(selectedBrands.filter(b => b !== brand));
-                              } else {
-                                setSelectedBrands([...selectedBrands, brand]);
-                              }
-                            }}
-                            className="peer appearance-none w-5 h-5 border-2 border-gray-200 dark:border-gray-700 rounded-md checked:bg-blue-600 dark:checked:bg-blue-500 checked:border-blue-600 dark:checked:border-blue-500 transition-all"
-                          />
-                          <X size={12} className="absolute left-1 top-1 text-white opacity-0 peer-checked:opacity-100 transition-opacity" />
-                        </div>
-                        <span className="text-sm font-bold text-gray-600 dark:text-gray-400 group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors">{brand}</span>
-                      </label>
-                    ))}
+                {/* Brands Filter */}
+                <div className="space-y-3 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-xs font-bold text-slate-400 dark:text-zinc-500 uppercase tracking-wider">
+                      Бренди ({availableBrands.length})
+                    </h3>
+                    {selectedBrands.length > 0 && (
+                      <button 
+                        onClick={() => setSelectedBrands([])}
+                        className="text-xs text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                      >
+                        Очистити
+                      </button>
+                    )}
+                  </div>
+                  
+                  <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                    {availableBrands.map(brand => {
+                      const isChecked = selectedBrands.includes(brand);
+                      return (
+                        <label 
+                          key={brand} 
+                          className="flex items-center justify-between p-2 rounded-xl hover:bg-slate-50 dark:hover:bg-zinc-800/60 cursor-pointer transition-colors"
+                        >
+                          <span className={`text-sm ${isChecked ? 'font-bold text-blue-600 dark:text-blue-400' : 'font-medium text-slate-700 dark:text-zinc-300'}`}>
+                            {brand}
+                          </span>
+                          <div className={`w-5 h-5 rounded-md border flex items-center justify-center transition-all ${
+                            isChecked 
+                              ? 'bg-blue-600 border-blue-600 text-white' 
+                              : 'border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800'
+                          }`}>
+                            {isChecked && <Check size={14} strokeWidth={3} />}
+                          </div>
+                        </label>
+                      );
+                    })}
                   </div>
                 </div>
               </div>
 
-              <div className="p-6 border-t border-gray-100 dark:border-gray-800 flex items-center space-x-3 bg-white dark:bg-gray-900">
+              {/* Footer Actions */}
+              <div className="p-4 sm:p-5 border-t border-slate-100 dark:border-zinc-800 flex items-center gap-2.5 bg-slate-50/50 dark:bg-zinc-900/50">
                 <button 
                   onClick={resetFilters}
-                  className="flex-1 py-3 px-4 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold text-gray-500 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800 hover:text-gray-700 dark:hover:text-gray-200 transition-all"
+                  className="flex items-center justify-center gap-1.5 py-3 px-4 border border-slate-200 dark:border-zinc-700 rounded-xl text-xs font-bold text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                 >
-                  Скинути
+                  <RotateCcw size={14} />
+                  <span>Скинути</span>
                 </button>
                 <button 
                   onClick={onClose}
-                  className="flex-[2] py-3 px-4 bg-gray-900 dark:bg-blue-600 text-white rounded-xl text-sm font-bold shadow-lg shadow-gray-200 dark:shadow-none hover:bg-black dark:hover:bg-blue-700 transition-all active:scale-95"
+                  className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-600/20 transition-all text-center cursor-pointer active:scale-95"
                 >
-                  Застосувати
+                  Показати результати
                 </button>
               </div>
             </motion.div>

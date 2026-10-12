@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, ShoppingCart, User, Menu, ChevronDown, Phone, MessageSquare, Tag, Percent, Sparkles, LogOut, Settings, X, ArrowRight, Heart, Moon, Sun, SlidersHorizontal, Truck, Clock } from 'lucide-react';
+import { Search, ShoppingCart, User, Menu, ChevronDown, Phone, MessageSquare, Tag, Percent, Sparkles, LogOut, Settings, X, ArrowRight, Heart, Moon, Sun, SlidersHorizontal, Truck, Clock, Car, Droplets } from 'lucide-react';
 import { useShop } from '../context/ShopContext';
 import { useCart } from '../context/CartContext';
 import { useWishlist } from '../context/WishlistContext';
@@ -489,17 +489,23 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
         </div>
 
         <div className="flex items-center space-x-1.5 sm:space-x-2 md:space-x-4">
-          <button 
-            onClick={() => setIsMobileSearchOpen(true)}
-            className="md:hidden flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50/50 dark:bg-gray-800/50 rounded-xl active:scale-90 border border-gray-100/50 dark:border-gray-800/50"
+          {/* Quick Hotline Call Button on Mobile */}
+          <a 
+            href="tel:+380689180637"
+            onClick={(e) => handlePhoneClick(e, '+380689180637', 'MobileTop')}
+            className="md:hidden flex items-center gap-1.5 px-2.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/50 rounded-xl text-xs font-bold active:scale-95 transition-all shadow-xs"
+            title="Подзвонити: +380 68 918 0637"
           >
-            <Search size={18} />
-          </button>
+            <Phone size={13} className="shrink-0" />
+            <span className="text-[11px] font-extrabold hidden xs:inline">068 918 0637</span>
+            <span className="text-[11px] font-extrabold xs:hidden">Дзвінок</span>
+          </a>
 
           {onFilterOpen && (
             <button 
               onClick={onFilterOpen}
-              className="md:hidden flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-850 rounded-xl active:scale-90 border border-gray-100 dark:border-gray-700"
+              className="md:hidden flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-zinc-800 rounded-xl active:scale-90 border border-gray-100 dark:border-zinc-700"
+              aria-label="Фільтри"
             >
               <SlidersHorizontal size={18} />
             </button>
@@ -507,7 +513,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
 
           <button 
             onClick={toggleTheme}
-            className="flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-gray-800 rounded-xl active:scale-90 border border-gray-100 dark:border-gray-700"
+            className="flex items-center justify-center p-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-all bg-gray-50 dark:bg-zinc-800 rounded-xl active:scale-90 border border-gray-100 dark:border-zinc-700"
             title={isDark ? "Увімкнути світлу тему" : "Увімкнути темну тему"}
           >
             <span className="text-[10px] font-black uppercase tracking-widest hidden xl:block">
@@ -610,6 +616,60 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
         </div>
       </div>
 
+      {/* Mobile Dedicated Search & Department Bar */}
+      <div className="md:hidden px-3.5 pb-2.5 pt-0 border-t border-slate-100 dark:border-zinc-800/80 bg-white/95 dark:bg-zinc-950/95">
+        <div className="flex items-center gap-2 mb-2">
+          {/* Quick Department Switch */}
+          <div className="flex-1 flex bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-xl border border-slate-200/80 dark:border-zinc-800 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => { setMode('auto'); setSelectedCategory(null); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                mode === 'auto'
+                  ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+              }`}
+            >
+              <Car size={13} strokeWidth={mode === 'auto' ? 2.5 : 2} />
+              <span className="text-[11px] font-bold truncate">Авто та МТЗ</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('plumbing'); setSelectedCategory(null); }}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+                mode === 'plumbing'
+                  ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+              }`}
+            >
+              <Droplets size={13} strokeWidth={mode === 'plumbing' ? 2.5 : 2} />
+              <span className="text-[11px] font-bold truncate">Сантехніка</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Quick Search Input */}
+        <form onSubmit={handleSearchSubmit} className="relative">
+          <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onFocus={() => setShowSuggestions(true)}
+            placeholder="Пошук деталі, бренду чи артикулу..."
+            className="w-full bg-slate-100/90 dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-700/80 rounded-xl py-2 pl-9 pr-8 text-xs font-semibold text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:border-blue-500 focus:bg-white dark:focus:bg-zinc-850 transition-all shadow-xs"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </form>
+      </div>
 
     </header>
     {createPortal(
@@ -621,144 +681,207 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsMobileMenuOpen(false)}
-              className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[140] md:hidden"
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-[140] md:hidden"
             />
             <motion.div
               initial={{ x: '-100%' }}
               animate={{ x: 0 }}
               exit={{ x: '-100%' }}
-              transition={{ type: 'spring', damping: 25, stiffness: 200 }}
-              className="fixed left-0 top-0 h-full w-full max-w-[280px] bg-white dark:bg-gray-900 shadow-2xl z-[150] md:hidden flex flex-col"
+              transition={{ type: 'spring', damping: 25, stiffness: 220 }}
+              className="fixed left-0 top-0 h-full w-full max-w-[320px] sm:max-w-[360px] bg-white dark:bg-zinc-900 shadow-2xl z-[150] md:hidden flex flex-col"
             >
-              <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between bg-white dark:bg-gray-900">
-                <span className="text-xl font-black text-blue-600">Меню</span>
+              {/* Drawer Header */}
+              <div className="p-4 border-b border-slate-100 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-900">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg font-black text-slate-900 dark:text-white">AutoPlumb</span>
+                  <span className="w-2 h-2 rounded-full bg-blue-600"></span>
+                </div>
                 <div className="flex items-center space-x-2">
                   <button 
                     onClick={toggleTheme}
-                    className="flex items-center gap-2 px-3 py-2 text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-colors bg-gray-50 dark:bg-gray-800 rounded-xl border border-gray-100 dark:border-gray-700"
+                    className="flex items-center gap-1.5 px-2.5 py-1.5 text-slate-600 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800 rounded-xl text-xs font-bold"
                   >
-                    <span className="text-[10px] font-black uppercase tracking-widest">
-                      {isDark ? 'Темна' : 'Світла'}
-                    </span>
-                    {isDark ? <Moon size={18} /> : <Sun size={18} />}
+                    {isDark ? <Moon size={16} /> : <Sun size={16} />}
                   </button>
                   <button 
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className="p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors text-gray-500"
+                    className="p-2 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl transition-colors text-slate-500"
+                    aria-label="Закрити меню"
                   >
                     <X size={20} />
                   </button>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto p-6 space-y-8 bg-white dark:bg-gray-900">
-                {/* Mobile Search */}
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Пошук товарів..."
-                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl py-3 pl-10 pr-4 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 dark:text-white transition-all"
-                  />
-                </div>
 
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Категорії</h3>
-                  <div className="grid grid-cols-1 gap-2">
-                    {['Всі товари', 'Акумулятори', 'Значки та емблеми', 'Автоаксесуари', 'Автоелектроніка', 'Автоінструменти'].map((cat) => (
-                      <button 
-                        key={cat}
-                        onClick={() => {
-                          handleCategoryClick(cat);
-                          setIsMobileMenuOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-3 rounded-xl font-bold transition-all ${
-                          (cat === 'Всі товари' && !selectedCategory) || selectedCategory === cat
-                            ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
-                            : 'text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800'
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
+              {/* Drawer Scrollable Content */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-white dark:bg-zinc-900">
+                {/* Department Selector */}
+                <div className="space-y-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                    Відділ магазину
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-100 dark:bg-zinc-800/80 rounded-xl">
+                    <button
+                      onClick={() => { setMode('auto'); setSelectedCategory(null); }}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                        mode === 'auto'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <Car size={14} />
+                      <span>Авто / МТЗ</span>
+                    </button>
+                    <button
+                      onClick={() => { setMode('plumbing'); setSelectedCategory(null); }}
+                      className={`flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg text-xs font-bold transition-all ${
+                        mode === 'plumbing'
+                          ? 'bg-blue-600 text-white shadow-sm'
+                          : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+                      }`}
+                    >
+                      <Droplets size={14} />
+                      <span>Сантехніка</span>
+                    </button>
                   </div>
                 </div>
 
-                <div className="space-y-4">
-                  <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Контакти</h3>
-                  <div className="space-y-3">
-                     <a 
-                      href="tel:+380689180637" 
-                      onClick={(e) => handlePhoneClick(e, '+380689180637', 'MobileКиївстар')}
-                      className="flex items-center space-x-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl group active:scale-95 transition-all relative"
-                     >
-                       <div className="p-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-xl">
-                         <Phone size={20} />
-                       </div>
-                       <div className="flex-1">
-                         <div className="text-sm font-black text-gray-900 dark:text-white">Київстар</div>
-                         <div className="text-xs text-gray-500 font-medium">+380 68 918 0637</div>
-                       </div>
-                       {phoneCopied === 'MobileКиївстар' && (
-                         <span className="absolute right-4 px-2.5 py-1 bg-green-500 text-white rounded-full text-[10px] font-black animate-pulse">
-                           Скопійовано!
-                         </span>
-                       )}
-                     </a>
-                    <Link 
+                {/* Categories List */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                      {mode === 'auto' ? 'Категорії запчастин' : 'Категорії сантехніки'}
+                    </span>
+                    {selectedCategory && (
+                      <button
+                        onClick={() => { setSelectedCategory(null); setIsMobileMenuOpen(false); }}
+                        className="text-xs text-blue-600 dark:text-blue-400 font-semibold"
+                      >
+                        Скинути
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-1">
+                    {(mode === 'auto' ? [
+                      'Всі товари',
+                      'Трактори МТЗ',
+                      'Запчастини ЮМЗ',
+                      'Акумулятори',
+                      'Автохімія та оливи',
+                      'Фільтри',
+                      'Автоелектроніка',
+                      'Автоінструменти',
+                      'Автоаксесуари'
+                    ] : [
+                      'Всі товари',
+                      'Змішувачі',
+                      'Опалення',
+                      'Радіатори',
+                      'Труби та фітинги',
+                      'Водонагрівачі',
+                      'Каналізація',
+                      'Крани та арматура'
+                    ]).map((cat) => {
+                      const isCatSelected = (cat === 'Всі товари' && !selectedCategory) || selectedCategory === cat;
+                      return (
+                        <button 
+                          key={cat}
+                          onClick={() => {
+                            handleCategoryClick(cat);
+                            setIsMobileMenuOpen(false);
+                          }}
+                          className={`w-full text-left px-3.5 py-2.5 rounded-xl font-bold text-xs transition-all flex items-center justify-between ${
+                            isCatSelected
+                              ? 'bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-black border border-blue-200 dark:border-blue-800'
+                              : 'text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800'
+                          }`}
+                        >
+                          <span>{cat}</span>
+                          {isCatSelected && <span className="w-1.5 h-1.5 rounded-full bg-blue-600" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Direct Hotline & Info */}
+                <div className="space-y-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">
+                    Підтримка та замовлення
+                  </div>
+                  
+                  <a 
+                    href="tel:+380689180637" 
+                    onClick={(e) => handlePhoneClick(e, '+380689180637', 'DrawerPhone')}
+                    className="flex items-center gap-3 p-3 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 rounded-xl border border-emerald-200/50 dark:border-emerald-800/40"
+                  >
+                    <div className="p-2 bg-emerald-600 text-white rounded-lg">
+                      <Phone size={16} />
+                    </div>
+                    <div>
+                      <div className="text-xs font-black">+380 68 918 0637</div>
+                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400">Пн–Сб: 08:30 – 19:00</div>
+                    </div>
+                  </a>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1">
+                    <Link
+                      to="/order-tracking/search"
+                      onClick={() => setIsMobileMenuOpen(false)}
+                      className="p-2.5 bg-slate-50 dark:bg-zinc-800 rounded-xl text-center text-xs font-bold text-slate-700 dark:text-zinc-300 hover:text-blue-600"
+                    >
+                      Відстежити
+                    </Link>
+                    <Link
                       to="/blog"
                       onClick={() => setIsMobileMenuOpen(false)}
-                      className="flex items-center space-x-4 p-4 bg-gray-50 dark:bg-gray-800 rounded-2xl group active:scale-95 transition-all"
+                      className="p-2.5 bg-slate-50 dark:bg-zinc-800 rounded-xl text-center text-xs font-bold text-slate-700 dark:text-zinc-300 hover:text-blue-600"
                     >
-                      <div className="p-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 rounded-xl">
-                        <MessageSquare size={20} />
-                      </div>
-                      <div>
-                        <div className="text-sm font-black text-gray-900 dark:text-white">Блог</div>
-                        <div className="text-xs text-gray-500 font-medium">Цікаві статті та новини</div>
-                      </div>
+                      Блог і поради
                     </Link>
                   </div>
                 </div>
               </div>
-              <div className="p-6 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 space-y-2.5">
+
+              {/* Drawer Bottom Profile/Auth */}
+              <div className="p-4 border-t border-slate-100 dark:border-zinc-800 bg-white dark:bg-zinc-900 space-y-2">
                 {user ? (
                   <>
                     <Link 
                       to="/profile" 
                       onClick={() => setIsMobileMenuOpen(false)}
-                      className="w-full flex items-center justify-center space-x-3 py-3.5 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-2xl font-bold transition-all text-sm"
+                      className="w-full flex items-center justify-center space-x-2 py-2.5 bg-slate-100 dark:bg-zinc-800 text-slate-800 dark:text-zinc-200 rounded-xl font-bold transition-all text-xs"
                     >
-                      <User size={18} />
-                      <span>Мій профіль</span>
+                      <User size={15} />
+                      <span>Мій профіль ({user.email?.split('@')[0]})</span>
                     </Link>
                     {isAdmin && (
                       <Link 
                         to="/admin" 
                         onClick={() => setIsMobileMenuOpen(false)}
-                        className="w-full flex items-center justify-center space-x-3 py-3.5 bg-blue-600 text-white hover:bg-blue-700 rounded-2xl font-black transition-all text-sm shadow-md shadow-blue-600/10"
+                        className="w-full flex items-center justify-center space-x-2 py-2 bg-blue-600 text-white rounded-xl font-bold transition-all text-xs shadow-xs"
                       >
-                        <Settings size={18} />
-                        <span>Адмін-панель ✨</span>
+                        <Settings size={15} />
+                        <span>Адмін-панель</span>
                       </Link>
                     )}
                     <button 
                       onClick={() => { handleLogout(); setIsMobileMenuOpen(false); }}
-                      className="w-full flex items-center justify-center space-x-3 py-3.5 bg-red-50 dark:bg-red-950/20 hover:bg-red-100 dark:hover:bg-red-950/40 text-red-500 rounded-2xl font-bold transition-all text-sm"
+                      className="w-full flex items-center justify-center space-x-2 py-2 text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-950/30 rounded-xl font-bold transition-all text-xs"
                     >
-                      <LogOut size={18} />
-                      <span>Вийти з акаунта</span>
+                      <LogOut size={15} />
+                      <span>Вийти</span>
                     </button>
                   </>
                 ) : (
                   <Link 
                     to="/auth" 
                     onClick={() => setIsMobileMenuOpen(false)}
-                    className="w-full flex items-center justify-center space-x-3 py-4 bg-blue-600 text-white rounded-2xl font-bold shadow-lg shadow-blue-200"
+                    className="w-full flex items-center justify-center space-x-2 py-3 bg-blue-600 text-white rounded-xl font-bold text-xs shadow-sm"
                   >
-                    <User size={20} />
-                    <span>Увійти</span>
+                    <User size={16} />
+                    <span>Увійти / Реєстрація</span>
                   </Link>
                 )}
               </div>

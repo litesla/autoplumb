@@ -4,6 +4,7 @@ import { Product, triggerFlyToCart } from '../lib/utils';
 import { useCart } from '../context/CartContext';
 import { useNavigate } from 'react-router-dom';
 import { getSanitizedProductImage, getCuratedFallback } from '../services/productImageService';
+import { triggerHaptic } from '../lib/telegram';
 
 interface ProductCardProps {
   product: Product;
@@ -16,6 +17,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
   const initialImage = getSanitizedProductImage(product);
   const [currentImg, setCurrentImg] = useState(initialImage);
   const [hasFailed, setHasFailed] = useState(false);
+  const [isAdded, setIsAdded] = useState(false);
 
   // Sync state if product changes
   React.useEffect(() => {
@@ -25,6 +27,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
 
   const handleCardClick = (e: React.MouseEvent) => {
     if (!(e.target as HTMLElement).closest('button')) {
+      triggerHaptic('light');
       navigate(`/product/${product.id}`);
     }
   };
@@ -32,8 +35,11 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
   const handleAddToCart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    triggerHaptic('medium');
     triggerFlyToCart(currentImg, e);
     addItem({ ...product, image: currentImg });
+    setIsAdded(true);
+    setTimeout(() => setIsAdded(false), 1600);
   };
 
   const handleImageError = () => {
@@ -49,7 +55,7 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
   return (
     <div 
       onClick={handleCardClick}
-      className="group bg-white dark:bg-zinc-900 rounded-xl border border-slate-200/80 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:shadow-md transition-all duration-200 h-full flex flex-col cursor-pointer overflow-hidden"
+      className="group bg-white dark:bg-zinc-900 rounded-xl border border-slate-200/80 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:shadow-md transition-all duration-200 h-full flex flex-col cursor-pointer overflow-hidden relative"
     >
       {/* Product Image Container */}
       <div className="aspect-square bg-slate-50 dark:bg-zinc-800/50 relative overflow-hidden flex items-center justify-center p-3 border-b border-slate-100 dark:border-zinc-800/60">
@@ -110,10 +116,23 @@ export const ProductCard: React.FC<ProductCardProps> = ({ product, showButtons =
           <button 
             onClick={handleAddToCart}
             aria-label="Додати в кошик"
-            className="flex items-center justify-center gap-1.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-semibold transition-colors cursor-pointer shadow-sm"
+            className={`flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95 ${
+              isAdded 
+                ? 'bg-emerald-600 text-white' 
+                : 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white'
+            }`}
           >
-            <ShoppingCart size={15} />
-            <span className="hidden sm:inline">Купити</span>
+            {isAdded ? (
+              <>
+                <Check size={14} strokeWidth={2.5} />
+                <span>Додано</span>
+              </>
+            ) : (
+              <>
+                <ShoppingCart size={14} />
+                <span>Купити</span>
+              </>
+            )}
           </button>
         </div>
       </div>

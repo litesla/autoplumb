@@ -139,35 +139,35 @@ export const Hero: React.FC = () => {
     <section className="w-full bg-slate-50 dark:bg-zinc-950 border-b border-slate-200/80 dark:border-zinc-800">
       
       {/* Main Hero Container */}
-      <div className="container mx-auto px-4 py-8 md:py-12 max-w-7xl">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+      <div className="container mx-auto px-4 py-6 sm:py-8 md:py-12 max-w-7xl">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 sm:gap-8 items-center">
           
           {/* LEFT: Storefront Mission & Navigation */}
-          <div className="lg:col-span-7 space-y-6">
+          <div className="lg:col-span-7 space-y-4 sm:space-y-6">
             
             {/* Mode Switcher: Segmented Control Tabs */}
-            <div className="inline-flex p-1 bg-slate-200/70 dark:bg-zinc-900 rounded-lg border border-slate-300/50 dark:border-zinc-800">
+            <div className="flex w-full sm:inline-flex p-1 bg-slate-200/70 dark:bg-zinc-900 rounded-lg border border-slate-300/50 dark:border-zinc-800">
               <button
                 onClick={() => { setMode('auto'); setSelectedCategory(null); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                   mode === 'auto'
                     ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Car size={15} />
-                <span>Автозапчастини та техніка</span>
+                <span>Авто та МТЗ</span>
               </button>
               <button
                 onClick={() => { setMode('plumbing'); setSelectedCategory(null); }}
-                className={`flex items-center gap-2 px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                className={`flex-1 sm:flex-initial flex items-center justify-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-2 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                   mode === 'plumbing'
                     ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm'
                     : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Droplets size={15} />
-                <span>Сантехніка та опалення</span>
+                <span>Сантехніка</span>
               </button>
             </div>
 

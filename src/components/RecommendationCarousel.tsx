@@ -3,11 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { 
   ChevronLeft, 
   ChevronRight, 
-  Flame, 
-  Sparkles, 
   ShoppingCart, 
   Check, 
-  Star, 
   Car, 
   Droplets, 
   Layers 
@@ -15,12 +12,13 @@ import {
 import { Product, triggerFlyToCart } from '../lib/utils';
 import { useCart } from '../context/CartContext';
 import { getSanitizedProductImage, getCuratedFallback } from '../services/productImageService';
+import { triggerHaptic } from '../lib/telegram';
 
 interface RecommendationCarouselProps {
   id: string;
   title: string;
   subtitle: string;
-  badgeText: string;
+  badgeText?: string;
   badgeType?: 'primary' | 'accent' | 'hot' | 'sale';
   icon?: 'flame' | 'sparkles';
   products: Product[];
@@ -51,6 +49,7 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
   });
 
   const scroll = (direction: 'left' | 'right') => {
+    triggerHaptic('light');
     if (!scrollContainerRef.current) return;
     const scrollAmount = 340;
     scrollContainerRef.current.scrollBy({
@@ -62,6 +61,7 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
   const handleAddToCart = (product: Product, e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
+    triggerHaptic('medium');
     const cleanImg = getSanitizedProductImage(product);
     triggerFlyToCart(cleanImg, e);
     addItem({ ...product, image: cleanImg });
@@ -87,16 +87,13 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
         {/* Header Block */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-6">
           <div className="space-y-1.5">
-            <div className="flex items-center gap-2">
-              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider border ${getBadgeClasses()}`}>
-                {icon === 'flame' ? (
-                  <Flame size={13} className="text-amber-500 fill-amber-500" />
-                ) : (
-                  <Sparkles size={13} className="text-violet-500" />
-                )}
-                <span>{badgeText}</span>
-              </span>
-            </div>
+            {badgeText && (
+              <div className="flex items-center gap-2">
+                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider border ${getBadgeClasses()}`}>
+                  <span>{badgeText}</span>
+                </span>
+              </div>
+            )}
 
             <h3 className="text-xl sm:text-2xl lg:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
               {title}
@@ -112,7 +109,10 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
             {/* Quick Segment Filter */}
             <div className="inline-flex p-1 bg-slate-200/70 dark:bg-zinc-900 rounded-lg border border-slate-300/40 dark:border-zinc-800 text-xs font-semibold">
               <button
-                onClick={() => setFilterType('all')}
+                onClick={() => {
+                  triggerHaptic('selection');
+                  setFilterType('all');
+                }}
                 className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   filterType === 'all'
                     ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm font-bold'
@@ -123,7 +123,10 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
                 <span>Всі</span>
               </button>
               <button
-                onClick={() => setFilterType('auto')}
+                onClick={() => {
+                  triggerHaptic('selection');
+                  setFilterType('auto');
+                }}
                 className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   filterType === 'auto'
                     ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm font-bold'
@@ -134,7 +137,10 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
                 <span>Авто</span>
               </button>
               <button
-                onClick={() => setFilterType('plumbing')}
+                onClick={() => {
+                  triggerHaptic('selection');
+                  setFilterType('plumbing');
+                }}
                 className={`px-3 py-1.5 rounded-md transition-all flex items-center gap-1.5 cursor-pointer ${
                   filterType === 'plumbing'
                     ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm font-bold'
@@ -176,8 +182,6 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
           {filteredProducts.map((product) => {
             const cleanImg = getSanitizedProductImage(product);
             const isInStock = product.stock === undefined || product.stock > 0;
-            const rating = product.rating || 4.9;
-            const reviews = product.reviewCount || 12;
 
             return (
               <div
@@ -214,15 +218,11 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
                     )}
                   </div>
 
-                  {/* In-Stock or Guaranteed badge */}
-                  <div className="absolute bottom-2 left-2.5 right-2.5 flex items-center justify-between text-[11px] text-slate-500">
+                  {/* In-Stock status */}
+                  <div className="absolute bottom-2 left-2.5 flex items-center text-[11px] text-slate-500">
                     <span className="flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400 bg-white/90 dark:bg-zinc-900/90 px-1.5 py-0.5 rounded backdrop-blur-xs">
                       <Check size={11} strokeWidth={2.5} />
                       <span>{isInStock ? 'В наявності' : 'Під замовлення'}</span>
-                    </span>
-                    <span className="flex items-center gap-0.5 font-bold text-amber-600 dark:text-amber-400 bg-white/90 dark:bg-zinc-900/90 px-1.5 py-0.5 rounded backdrop-blur-xs">
-                      <Star size={10} className="fill-amber-500 text-amber-500" />
-                      <span>{rating.toFixed(1)}</span>
                     </span>
                   </div>
                 </div>
@@ -259,9 +259,6 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
                     <div>
                       <div className="text-base sm:text-lg font-bold text-slate-900 dark:text-white tabular-nums tracking-tight">
                         {product.price.toLocaleString('uk-UA')} <span className="text-xs font-normal text-slate-500 dark:text-zinc-400">грн</span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 dark:text-zinc-500">
-                        {reviews} відгуків
                       </div>
                     </div>
 
