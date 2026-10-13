@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Product } from '../lib/utils';
 import { getSanitizedProductGallery, getCuratedFallback } from '../services/productImageService';
 import { useCart } from '../context/CartContext';
-import { ShoppingCart, ChevronLeft, ChevronRight, ArrowLeft, Package, ShieldCheck, Truck } from 'lucide-react';
+import { ShoppingCart, ChevronLeft, ChevronRight, ArrowLeft, Package, ShieldCheck, Truck, Check } from 'lucide-react';
 import { motion } from 'motion/react';
 import { ProductCard } from '../components/ProductCard';
 import { ProductReviews } from '../components/ProductReviews';
@@ -17,6 +17,7 @@ const ProductPage: React.FC = () => {
   const [recommendedProducts, setRecommendedProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentImage, setCurrentImage] = useState(0);
+  const [isAdded, setIsAdded] = useState(false);
 
   useEffect(() => {
     const fetchProduct = async () => {
@@ -114,42 +115,64 @@ const ProductPage: React.FC = () => {
 
           <div className="bg-white dark:bg-zinc-900 rounded-3xl shadow-sm overflow-hidden flex flex-col lg:flex-row border border-slate-200/80 dark:border-zinc-800">
             {/* Image Gallery */}
-            <div className="lg:w-1/2 relative bg-slate-50 dark:bg-zinc-800/40 flex items-center justify-center group min-h-[300px] sm:min-h-[400px] lg:min-h-[500px]">
-              <motion.img 
-                key={currentImage}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                src={images[currentImage]} 
-                alt={product.name} 
-                className="w-full h-full object-contain p-6 max-h-[400px] lg:max-h-[500px]"
-                referrerPolicy="no-referrer"
-                onError={handleMainImageError}
-              />
-              
-              <button 
-                onClick={() => setCurrentImage(prev => (prev === 0 ? images.length - 1 : prev - 1))}
-                className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 p-2 sm:p-3 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md rounded-full shadow-md hover:bg-white dark:hover:bg-zinc-700 transition-all active:scale-90 text-gray-900 dark:text-white"
-                aria-label="Попереднє фото"
-              >
-                <ChevronLeft size={20} />
-              </button>
-              <button 
-                onClick={() => setCurrentImage(prev => (prev === images.length - 1 ? 0 : prev + 1))}
-                className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 p-2 sm:p-3 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md rounded-full shadow-md hover:bg-white dark:hover:bg-zinc-700 transition-all active:scale-90 text-gray-900 dark:text-white"
-                aria-label="Наступне фото"
-              >
-                <ChevronRight size={20} />
-              </button>
+            <div className="lg:w-1/2 flex flex-col bg-slate-50 dark:bg-zinc-800/40 border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-zinc-800">
+              <div className="relative flex-1 flex items-center justify-center group min-h-[300px] sm:min-h-[380px] lg:min-h-[440px] p-4 sm:p-6">
+                <motion.img 
+                  key={currentImage}
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  src={images[currentImage]} 
+                  alt={product.name} 
+                  className="w-full h-full object-contain max-h-[360px] lg:max-h-[440px]"
+                  referrerPolicy="no-referrer"
+                  onError={handleMainImageError}
+                />
+                
+                <button 
+                  onClick={() => setCurrentImage(prev => (prev === 0 ? images.length - 1 : prev - 1))}
+                  className="absolute left-3 sm:left-6 top-1/2 -translate-y-1/2 p-2 sm:p-3 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md rounded-full shadow-md hover:bg-white dark:hover:bg-zinc-700 transition-all active:scale-90 text-gray-900 dark:text-white cursor-pointer"
+                  aria-label="Попереднє фото"
+                >
+                  <ChevronLeft size={20} />
+                </button>
+                <button 
+                  onClick={() => setCurrentImage(prev => (prev === images.length - 1 ? 0 : prev + 1))}
+                  className="absolute right-3 sm:right-6 top-1/2 -translate-y-1/2 p-2 sm:p-3 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-md rounded-full shadow-md hover:bg-white dark:hover:bg-zinc-700 transition-all active:scale-90 text-gray-900 dark:text-white cursor-pointer"
+                  aria-label="Наступне фото"
+                >
+                  <ChevronRight size={20} />
+                </button>
 
-              <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-2">
-                {images.map((_, i) => (
-                  <button 
-                    key={i}
-                    onClick={() => setCurrentImage(i)}
-                    className={`w-2 h-2 rounded-full transition-all duration-300 ${currentImage === i ? 'bg-blue-600 w-6' : 'bg-gray-300 dark:bg-gray-600 hover:bg-gray-400 dark:hover:bg-gray-500'}`}
-                  />
-                ))}
+                {/* Mobile Dots */}
+                <div className="sm:hidden absolute bottom-3 left-1/2 -translate-x-1/2 flex space-x-2">
+                  {images.map((_, i) => (
+                    <button 
+                      key={i}
+                      onClick={() => setCurrentImage(i)}
+                      className={`w-2 h-2 rounded-full transition-all duration-300 ${currentImage === i ? 'bg-blue-600 w-6' : 'bg-gray-300 dark:bg-gray-600'}`}
+                    />
+                  ))}
+                </div>
               </div>
+
+              {/* Desktop Thumbnails */}
+              {images.length > 1 && (
+                <div className="hidden sm:flex items-center justify-center gap-2.5 p-4 border-t border-slate-200/60 dark:border-zinc-800 bg-white/50 dark:bg-zinc-900/40">
+                  {images.map((img, i) => (
+                    <button
+                      key={i}
+                      onClick={() => setCurrentImage(i)}
+                      className={`w-14 h-14 rounded-xl border-2 p-1 bg-white dark:bg-zinc-800 transition-all cursor-pointer overflow-hidden ${
+                        currentImage === i
+                          ? 'border-blue-600 ring-2 ring-blue-500/20 scale-105'
+                          : 'border-slate-200 dark:border-zinc-700 opacity-70 hover:opacity-100'
+                      }`}
+                    >
+                      <img src={img} alt={`Мініатюра ${i + 1}`} className="w-full h-full object-contain" />
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Product Info */}
@@ -212,11 +235,28 @@ const ProductPage: React.FC = () => {
 
               <div className="flex flex-col sm:flex-row gap-3">
                 <button 
-                  onClick={() => addItem(product)}
-                  className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3.5 sm:py-4 rounded-xl font-bold text-sm sm:text-base shadow-md shadow-blue-600/20 active:scale-[0.98] transition-all flex items-center justify-center space-x-2 cursor-pointer"
+                  onClick={() => {
+                    addItem(product);
+                    setIsAdded(true);
+                    setTimeout(() => setIsAdded(false), 2000);
+                  }}
+                  className={`flex-1 py-3.5 sm:py-4 rounded-xl font-bold text-sm sm:text-base shadow-md transition-all flex items-center justify-center space-x-2 cursor-pointer ${
+                    isAdded 
+                      ? 'bg-emerald-600 text-white shadow-emerald-600/20' 
+                      : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98] text-white shadow-blue-600/20'
+                  }`}
                 >
-                  <ShoppingCart size={18} />
-                  <span>Додати до кошика</span>
+                  {isAdded ? (
+                    <>
+                      <Check size={18} />
+                      <span>Додано до кошика!</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingCart size={18} />
+                      <span>Додати до кошика</span>
+                    </>
+                  )}
                 </button>
                 <button 
                   onClick={() => {
@@ -228,6 +268,42 @@ const ProductPage: React.FC = () => {
                   Купити зараз
                 </button>
               </div>
+            </div>
+          </div>
+
+          {/* Sticky Mobile Buy Bar */}
+          <div className="sm:hidden fixed bottom-16 left-0 right-0 z-40 bg-white/95 dark:bg-zinc-950/95 backdrop-blur-md border-t border-slate-200 dark:border-zinc-800 px-4 py-2.5 shadow-2xl flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate font-medium">Ціна товару</div>
+              <div className="text-lg font-black text-slate-900 dark:text-white leading-tight">
+                {product.price.toLocaleString('uk-UA')} <span className="text-xs font-normal text-slate-500">грн</span>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                onClick={() => {
+                  addItem(product);
+                  setIsAdded(true);
+                  setTimeout(() => setIsAdded(false), 2000);
+                }}
+                className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                  isAdded
+                    ? 'bg-emerald-600 text-white'
+                    : 'bg-blue-600 text-white active:scale-95 shadow-md shadow-blue-600/20'
+                }`}
+              >
+                {isAdded ? <Check size={16} /> : <ShoppingCart size={16} />}
+                <span>{isAdded ? 'Додано' : 'У кошик'}</span>
+              </button>
+              <button
+                onClick={() => {
+                  addItem(product);
+                  navigate('/checkout');
+                }}
+                className="px-3.5 py-2.5 bg-slate-900 dark:bg-zinc-800 text-white rounded-xl text-xs font-bold active:scale-95 transition-all cursor-pointer"
+              >
+                Купити
+              </button>
             </div>
           </div>
 

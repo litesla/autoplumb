@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck, Bell, Menu, MessageSquare } from 'lucide-react';
+import { LayoutDashboard, Package, ShoppingBag, Settings, Plus, Trash2, Edit, Upload, AlertTriangle, X, Download, CheckSquare, Square, ChevronRight, BookOpen, Sparkles, RotateCw, Wand2, ShieldAlert, ShieldCheck, Bell, Menu, MessageSquare, Camera } from 'lucide-react';
 import { Product, Order } from '../lib/utils';
 import { BlogPost } from './BlogPage';
 import { AdminChatTab } from '../components/AdminChatTab';
 import { AdminAiPhotoStudio } from '../components/AdminAiPhotoStudio';
+import { QuickPhotoModal } from '../components/QuickPhotoModal';
 import * as XLSX from 'xlsx';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAuth } from '../context/AuthContext';
@@ -329,6 +330,7 @@ export const AdminPage: React.FC = () => {
   const [isAddingProduct, setIsAddingProduct] = useState(false);
   const [isAddingPost, setIsAddingPost] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
+  const [quickPhotoProduct, setQuickPhotoProduct] = useState<Product | null>(null);
   const [editingPost, setEditingPost] = useState<BlogPost | null>(null);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
   const [isConfirmingDeleteAll, setIsConfirmingDeleteAll] = useState(false);
@@ -2563,6 +2565,19 @@ export const AdminPage: React.FC = () => {
         )}
       </AnimatePresence>
 
+      {/* Quick Photo Modal for Mobile / Desktop */}
+      <AnimatePresence>
+        {quickPhotoProduct && (
+          <QuickPhotoModal 
+            product={quickPhotoProduct}
+            onClose={() => setQuickPhotoProduct(null)}
+            onSuccess={(updated) => {
+              setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
+            }}
+          />
+        )}
+      </AnimatePresence>
+
       {/* Edit Blog Post Modal */}
       <AnimatePresence>
         {editingPost && (
@@ -3453,12 +3468,23 @@ export const AdminPage: React.FC = () => {
                           <CheckSquare size={14} className="stroke-[3]" />
                         </button>
                         
-                        <div className="w-12 h-12 bg-gray-50 rounded-lg overflow-hidden shrink-0 border border-gray-100">
+                        {/* Interactive Photo with Quick Change Camera Badge */}
+                        <div 
+                          onClick={() => setQuickPhotoProduct(p)}
+                          className="relative w-14 h-14 bg-gray-50 rounded-xl overflow-hidden shrink-0 border border-gray-200/80 shadow-xs cursor-pointer group active:scale-95 transition-all"
+                          title="Швидка зміна фото"
+                        >
                           <img 
                             src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/100/100`} 
                             className="w-full h-full object-cover" 
                             referrerPolicy="no-referrer"
                           />
+                          <div className="absolute inset-0 bg-black/25 opacity-0 active:opacity-100 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                            <Camera size={14} className="text-white drop-shadow" />
+                          </div>
+                          <span className="absolute bottom-0 right-0 p-1 bg-blue-600 text-white rounded-tl-md shadow-xs">
+                            <Camera size={10} strokeWidth={2.5} />
+                          </span>
                         </div>
                         
                         <div className="flex-1 min-w-0">
@@ -3486,16 +3512,28 @@ export const AdminPage: React.FC = () => {
                       
                       <div className="flex items-center justify-between pt-2 border-t border-gray-50 bg-gray-50/40 px-2 py-1.5 rounded-xl">
                         <div className="text-sm font-black text-gray-900">{p.price} грн</div>
-                        <div className="flex items-center space-x-1">
+                        <div className="flex items-center space-x-1.5">
+                          {/* Dedicated Quick Photo Button for Mobile Admin */}
+                          <button 
+                            type="button"
+                            onClick={() => setQuickPhotoProduct(p)} 
+                            className="flex items-center gap-1 px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 rounded-lg text-xs font-black transition-colors cursor-pointer"
+                            title="Швидко змінити або зняти фото"
+                          >
+                            <Camera size={13} strokeWidth={2.2} />
+                            <span>Змінити фото</span>
+                          </button>
                           <button 
                             onClick={() => setEditingProduct(p)} 
                             className="p-1.5 text-gray-500 hover:text-blue-600 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-100"
+                            title="Редагувати всі поля"
                           >
                             <Edit size={16} />
                           </button>
                           <button 
                             onClick={() => handleDeleteProduct(p)} 
                             className="p-1.5 text-gray-500 hover:text-red-500 hover:bg-white rounded-lg transition-colors border border-transparent hover:border-gray-100"
+                            title="Видалити"
                           >
                             <Trash2 size={16} />
                           </button>
@@ -3550,8 +3588,15 @@ export const AdminPage: React.FC = () => {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center space-x-3">
-                            <div className="w-10 h-10 bg-gray-100 rounded-lg overflow-hidden border border-gray-100 shadow-sm shrink-0">
+                            <div 
+                              onClick={() => setQuickPhotoProduct(p)} 
+                              className="relative w-10 h-10 bg-gray-100 rounded-lg overflow-hidden border border-gray-100 shadow-sm shrink-0 cursor-pointer group"
+                              title="Швидка зміна фото"
+                            >
                               <img src={getFirstImage(p.image) || `https://picsum.photos/seed/${p.id}/100/100`} className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                              <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity">
+                                <Camera size={14} className="text-white drop-shadow" />
+                              </div>
                             </div>
                             <a 
                               href={`/product/${p.id}`} 
@@ -3572,8 +3617,9 @@ export const AdminPage: React.FC = () => {
                         <td className="px-6 py-4 font-bold text-gray-900">{p.price} грн</td>
                         <td className="px-6 py-4 text-right">
                           <div className="flex items-center justify-end space-x-2">
-                            <button onClick={() => setEditingProduct(p)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors"><Edit size={18} /></button>
-                            <button onClick={() => handleDeleteProduct(p)} className="p-2 text-gray-400 hover:text-red-500 transition-colors"><Trash2 size={18} /></button>
+                            <button onClick={() => setQuickPhotoProduct(p)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors" title="Швидка зміна фото"><Camera size={18} /></button>
+                            <button onClick={() => setEditingProduct(p)} className="p-2 text-gray-400 hover:text-blue-600 transition-colors" title="Редагувати"><Edit size={18} /></button>
+                            <button onClick={() => handleDeleteProduct(p)} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Видалити"><Trash2 size={18} /></button>
                           </div>
                         </td>
                       </tr>

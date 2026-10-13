@@ -22,7 +22,7 @@ const getFirstProductImage = (imgStr?: string, product?: any) => {
 
 export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () => void }, { onCartOpen: () => void; onFilterOpen?: () => void }>(({ onCartOpen, onFilterOpen }, ref) => {
   const { mode, setMode, searchQuery, setSearchQuery, selectedCategory, setSelectedCategory } = useShop();
-  const { items } = useCart();
+  const { items, total } = useCart();
   const { wishlist } = useWishlist();
   const { user, isAdmin } = useAuth();
   const [activeDropdown, setActiveDropdown] = useState<string | null>(null);
@@ -170,8 +170,18 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
         setShowSuggestions(false);
       }
     };
+    const handleSlashShortcut = (e: KeyboardEvent) => {
+      if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
     document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    window.addEventListener('keydown', handleSlashShortcut);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      window.removeEventListener('keydown', handleSlashShortcut);
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -234,6 +244,32 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">AutoPlumb</span>
           <span className="w-2 h-2 rounded-full bg-blue-600 mb-1"></span>
         </Link>
+
+        {/* Desktop Department Switcher */}
+        <div className="hidden xl:flex items-center p-1 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200/80 dark:border-zinc-800 shrink-0">
+          <button
+            onClick={() => { setMode('auto'); setSelectedCategory(null); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              mode === 'auto'
+                ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-xs'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Car size={13} />
+            <span>Авто/МТЗ</span>
+          </button>
+          <button
+            onClick={() => { setMode('plumbing'); setSelectedCategory(null); }}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+              mode === 'plumbing'
+                ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-xs'
+                : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+            }`}
+          >
+            <Droplets size={13} />
+            <span>Сантехніка</span>
+          </button>
+        </div>
 
         <nav className="hidden md:flex items-center space-x-1">
           {/* Контакти */}
@@ -394,7 +430,7 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           </Link>
         </nav>
 
-        <div className="flex-1 max-w-md mx-8 hidden lg:block">
+        <div className="flex-1 max-w-md lg:max-w-xl mx-2 lg:mx-6 hidden md:block">
           <form onSubmit={handleSearchSubmit} className="relative group">
             <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-blue-600 transition-colors" size={18} />
             <input
@@ -404,9 +440,12 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => setShowSuggestions(true)}
               onKeyDown={handleKeyDown}
-              placeholder="Пошук товарів за назвою, брендом або артикулом..."
-              className="w-full bg-gray-50 dark:bg-gray-800 border-2 border-transparent focus:border-blue-500/20 rounded-2xl py-2.5 pl-12 pr-4 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/5 transition-all dark:text-white"
+              placeholder="Пошук товарів за назвою, брендом, артикулом..."
+              className="w-full bg-slate-50 dark:bg-zinc-800 border-2 border-transparent focus:border-blue-500/20 rounded-2xl py-2.5 pl-12 pr-10 text-sm font-bold focus:outline-none focus:ring-4 focus:ring-blue-500/5 transition-all text-slate-900 dark:text-white"
             />
+            <kbd className="hidden lg:inline-flex items-center px-1.5 py-0.5 text-[10px] font-mono text-slate-400 bg-slate-200/70 dark:bg-zinc-700/80 rounded absolute right-3.5 top-1/2 -translate-y-1/2 select-none pointer-events-none">
+              /
+            </kbd>
             
             <AnimatePresence>
               {showSuggestions && searchQuery.length > 1 && (
@@ -598,14 +637,21 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
           <button 
             id="header-cart-btn"
             onClick={onCartOpen}
-            className="hidden md:flex p-2.5 text-gray-600 dark:text-gray-400 hover:text-blue-600 transition-all bg-gray-50 dark:bg-gray-800 rounded-2xl relative active:scale-90"
+            className="hidden md:flex items-center gap-2.5 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs transition-all active:scale-95 cursor-pointer"
+            aria-label="Кошик покупок"
           >
-            <ShoppingCart size={20} />
-            {items.length > 0 && (
-              <span className="absolute -top-1 -right-1 bg-blue-600 text-white text-[10px] font-bold w-4 h-4 rounded-full flex items-center justify-center border-2 border-white dark:border-gray-900">
-                {items.length}
-              </span>
-            )}
+            <div className="relative">
+              <ShoppingCart size={19} />
+              {items.length > 0 && (
+                <span className="absolute -top-1.5 -right-2 bg-amber-400 text-slate-950 text-[10px] font-black w-4 h-4 rounded-full flex items-center justify-center">
+                  {items.reduce((acc, i) => acc + i.quantity, 0)}
+                </span>
+              )}
+            </div>
+            <div className="text-left hidden lg:block pr-0.5">
+              <div className="text-[10px] text-blue-100 font-semibold uppercase tracking-wider leading-none">Кошик</div>
+              <div className="text-xs font-bold leading-tight tabular-nums">{total.toLocaleString('uk-UA')} грн</div>
+            </div>
           </button>
           <button 
             onClick={() => setIsMobileMenuOpen(true)}
@@ -620,30 +666,38 @@ export const Header = forwardRef<{ openSearch: () => void; openMobileMenu: () =>
       <div className="md:hidden px-3.5 pb-2.5 pt-0 border-t border-slate-100 dark:border-zinc-800/80 bg-white/95 dark:bg-zinc-950/95">
         <div className="flex items-center gap-2 mb-2">
           {/* Quick Department Switch */}
-          <div className="flex-1 flex bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-xl border border-slate-200/80 dark:border-zinc-800 text-xs font-bold">
+          <div className="flex-1 flex bg-slate-200/60 dark:bg-zinc-900 p-1 rounded-xl border border-slate-300/70 dark:border-zinc-800 text-xs font-bold shadow-2xs">
             <button
               type="button"
               onClick={() => { setMode('auto'); setSelectedCategory(null); }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none active:scale-[0.98] ${
                 mode === 'auto'
-                  ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+                  ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-xs ring-1 ring-slate-900/5 dark:ring-white/10'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Car size={13} strokeWidth={mode === 'auto' ? 2.5 : 2} />
-              <span className="text-[11px] font-bold truncate">Авто та МТЗ</span>
+              <span className={`p-0.5 rounded transition-colors ${
+                mode === 'auto' ? 'text-blue-600 dark:text-blue-400' : 'text-slate-500 dark:text-zinc-400'
+              }`}>
+                <Car size={14} strokeWidth={mode === 'auto' ? 2.5 : 2} />
+              </span>
+              <span className="text-xs font-bold truncate">Авто та МТЗ</span>
             </button>
             <button
               type="button"
               onClick={() => { setMode('plumbing'); setSelectedCategory(null); }}
-              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all ${
+              className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg text-xs font-bold transition-all cursor-pointer select-none active:scale-[0.98] ${
                 mode === 'plumbing'
-                  ? 'bg-white dark:bg-zinc-800 text-blue-600 dark:text-blue-400 shadow-sm'
-                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900'
+                  ? 'bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-xs ring-1 ring-slate-900/5 dark:ring-white/10'
+                  : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
               }`}
             >
-              <Droplets size={13} strokeWidth={mode === 'plumbing' ? 2.5 : 2} />
-              <span className="text-[11px] font-bold truncate">Сантехніка</span>
+              <span className={`p-0.5 rounded transition-colors ${
+                mode === 'plumbing' ? 'text-cyan-600 dark:text-cyan-400' : 'text-slate-500 dark:text-zinc-400'
+              }`}>
+                <Droplets size={14} strokeWidth={mode === 'plumbing' ? 2.5 : 2} />
+              </span>
+              <span className="text-xs font-bold truncate">Сантехніка</span>
             </button>
           </div>
         </div>

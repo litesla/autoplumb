@@ -152,8 +152,8 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
               </button>
             </div>
 
-            {/* Left / Right arrows */}
-            <div className="flex items-center gap-1.5">
+            {/* Left / Right arrows (Desktop & Tablet) */}
+            <div className="hidden sm:flex items-center gap-1.5">
               <button
                 onClick={() => scroll('left')}
                 aria-label="Попередні рекомендації"
@@ -176,7 +176,7 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
         <div
           id={id}
           ref={scrollContainerRef}
-          className="flex overflow-x-auto gap-4 sm:gap-5 pb-4 pt-1 scrollbar-hide snap-x snap-mandatory scroll-smooth"
+          className="flex overflow-x-auto gap-3 sm:gap-5 pb-3 sm:pb-4 pt-1 scrollbar-hide snap-x snap-mandatory scroll-smooth"
           style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
         >
           {filteredProducts.map((product) => {
@@ -187,7 +187,7 @@ export const RecommendationCarousel: React.FC<RecommendationCarouselProps> = ({
               <div
                 key={product.id}
                 onClick={() => navigate(`/product/${product.id}`)}
-                className="group shrink-0 w-[240px] sm:w-[280px] snap-start bg-white dark:bg-zinc-900 rounded-xl border border-slate-200/90 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-lg transition-all duration-200 flex flex-col cursor-pointer overflow-hidden"
+                className="group shrink-0 w-[205px] sm:w-[280px] snap-start bg-white dark:bg-zinc-900 rounded-xl border border-slate-200/90 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-lg transition-all duration-200 flex flex-col cursor-pointer overflow-hidden"
               >
                 {/* Product Image Box */}
                 <div className="relative aspect-square bg-slate-50 dark:bg-zinc-800/40 p-4 border-b border-slate-100 dark:border-zinc-800/60 overflow-hidden flex items-center justify-center">

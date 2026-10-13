@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Hero } from '../components/Hero';
 import { ProductCard } from '../components/ProductCard';
-import { FilterSidebar } from '../components/FilterSidebar';
+import { FilterSidebar, DesktopFilterSidebar } from '../components/FilterSidebar';
 import { RecommendationCarousel } from '../components/RecommendationCarousel';
 import { TOP_RECOMMENDED_PRODUCTS, SPECIAL_RECOMMENDED_PRODUCTS } from '../data/recommendedProducts';
 import { useShop } from '../context/ShopContext';
@@ -312,138 +312,148 @@ export const HomePage: React.FC = () => {
       />
 
       <section id="products" className="py-8 md:py-12 bg-white dark:bg-black transition-colors relative">
-        <div className="container mx-auto px-4">
+        <div className="container mx-auto px-4 max-w-7xl">
           
-          {/* Quick Categories Horizontal Scroll for Mobile */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-3 mb-4 no-scrollbar">
-            {quickCategoryList.map((cat) => {
-              const isSelected = (cat === 'Всі товари' && !selectedCategory) || selectedCategory === cat;
-              return (
-                <button
-                  key={cat}
-                  onClick={() => setSelectedCategory(cat === 'Всі товари' ? null : cat)}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
-                    isSelected
-                      ? 'bg-blue-600 text-white shadow-xs'
-                      : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-700'
-                  }`}
-                >
-                  {cat}
-                </button>
-              );
-            })}
-          </div>
+          {/* Main Catalog View: Desktop Sidebar on Left + Products Area on Right */}
+          <div className="lg:flex lg:gap-8 lg:items-start">
+            
+            {/* Desktop Persistent Sidebar (Only visible on lg: screens) */}
+            <DesktopFilterSidebar availableBrands={availableBrands} />
 
-          {/* Unified Catalog Header & Controls Bar */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-100 dark:border-zinc-800 gap-3">
-            <div>
-              <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-                {selectedCategory || (mode === 'auto' ? 'Каталог автозапчастин' : 'Каталог сантехніки')}
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                Знайдено <span className="font-bold text-slate-900 dark:text-white tabular-nums">{totalCount}</span> товарів
-              </p>
-            </div>
+            {/* Mobile Drawer (Only on mobile/tablet) */}
+            <FilterSidebar 
+              isOpen={isFilterOpen} 
+              onClose={() => setIsFilterOpen(false)} 
+              availableBrands={availableBrands}
+            />
 
-            <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap sm:flex-nowrap">
-              {/* Filter button */}
-              <button 
-                data-filter-trigger
-                onClick={() => setIsFilterOpen(true)}
-                className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl text-slate-700 dark:text-zinc-200 font-bold hover:text-blue-600 transition-all active:scale-95 text-xs shadow-2xs cursor-pointer"
-              >
-                <SlidersHorizontal size={14} />
-                <span>Фільтри</span>
-                {(selectedBrands.length > 0 || (priceRange && (priceRange[0] > 0 || priceRange[1] < 50000))) && (
-                  <span className="w-2 h-2 rounded-full bg-blue-600" />
-                )}
-              </button>
-
-              {/* Sort selector dropdown */}
-              <div className="relative">
-                <select 
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as any)}
-                  className="appearance-none bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl pl-8 pr-7 py-2 text-xs font-bold text-slate-800 dark:text-zinc-200 focus:outline-none focus:border-blue-500 shadow-2xs cursor-pointer"
-                >
-                  <option value="popular">За популярністю</option>
-                  <option value="price_asc">Від дешевих до дорогих</option>
-                  <option value="price_desc">Від дорогих до дешевих</option>
-                  <option value="newest">Нові надходження</option>
-                </select>
-                <ArrowUpDown className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            {/* Right column: Catalog header, controls and products */}
+            <div className="flex-1 min-w-0">
+              
+              {/* Quick Categories Horizontal Scroll for Mobile / Tablet */}
+              <div className="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-3 mb-4 no-scrollbar">
+                {quickCategoryList.map((cat) => {
+                  const isSelected = (cat === 'Всі товари' && !selectedCategory) || selectedCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat === 'Всі товари' ? null : cat)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-blue-600 text-white shadow-xs'
+                          : 'bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
               </div>
-            </div>
-          </div>
 
-          {/* Quick sorting tabs */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-4 mb-4 no-scrollbar text-xs font-semibold">
-            {[
-              { id: 'popular', label: 'Популярні' },
-              { id: 'price_asc', label: 'Від дешевих' },
-              { id: 'price_desc', label: 'Від дорогих' },
-              { id: 'newest', label: 'Новинки' }
-            ].map((s) => (
-              <button
-                key={s.id}
-                onClick={() => setSortBy(s.id as any)}
-                className={`inline-flex items-center px-3 py-1.5 rounded-lg transition-all whitespace-nowrap text-xs cursor-pointer ${
-                  sortBy === s.id
-                    ? 'bg-blue-600 text-white font-bold shadow-2xs'
-                    : 'bg-slate-100 dark:bg-zinc-800/80 text-slate-700 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-800'
-                }`}
-              >
-                <span>{s.label}</span>
-              </button>
-            ))}
-          </div>
+              {/* Unified Catalog Header & Controls Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 mb-3 border-b border-slate-100 dark:border-zinc-800 gap-3">
+                <div>
+                  <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
+                    {selectedCategory || (mode === 'auto' ? 'Каталог автозапчастин' : 'Каталог сантехніки')}
+                  </h2>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                    Знайдено <span className="font-bold text-slate-900 dark:text-white tabular-nums">{totalCount}</span> товарів
+                  </p>
+                </div>
 
-          <FilterSidebar 
-            isOpen={isFilterOpen} 
-            onClose={() => setIsFilterOpen(false)} 
-            availableBrands={availableBrands}
-          />
-
-          <div className="w-full">
-            {fetchError ? (
-              <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 p-12 rounded-[40px] text-center max-w-2xl mx-auto">
-                <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6" />
-                <h3 className="text-2xl font-black text-red-900 dark:text-red-400 mb-2">Помилка з'єднання</h3>
-                <p className="text-red-700/60 dark:text-red-400/60 font-medium mb-6 font-mono text-xs">{fetchError}</p>
-                <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                <div className="flex items-center gap-2 self-start sm:self-auto flex-wrap sm:flex-nowrap">
+                  {/* Mobile-only Filter Trigger Button */}
                   <button 
-                    onClick={() => fetchProducts(0, true)}
-                    className="bg-red-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200"
+                    data-filter-trigger
+                    onClick={() => setIsFilterOpen(true)}
+                    className="lg:hidden flex items-center gap-1.5 px-3 py-2 bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl text-slate-700 dark:text-zinc-200 font-bold hover:text-blue-600 transition-all active:scale-95 text-xs shadow-2xs cursor-pointer"
                   >
-                    Спробувати ще раз
+                    <SlidersHorizontal size={14} />
+                    <span>Фільтри</span>
+                    {(selectedBrands.length > 0 || (priceRange && (priceRange[0] > 0 || priceRange[1] < 50000))) && (
+                      <span className="w-2 h-2 rounded-full bg-blue-600" />
+                    )}
                   </button>
-                  {isAdmin && (
-                    <Link to="/admin?tab=diagnostics" className="text-red-600 font-bold hover:underline">
-                      Діагностика →
-                    </Link>
-                  )}
+
+                  {/* Sort selector dropdown (Desktop & Tablet) */}
+                  <div className="relative hidden sm:block">
+                    <select 
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as any)}
+                      className="appearance-none bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-xl pl-8 pr-7 py-2 text-xs font-bold text-slate-800 dark:text-zinc-200 focus:outline-none focus:border-blue-500 shadow-2xs cursor-pointer"
+                    >
+                      <option value="popular">За популярністю</option>
+                      <option value="price_asc">Від дешевих до дорогих</option>
+                      <option value="price_desc">Від дорогих до дешевих</option>
+                      <option value="newest">Нові надходження</option>
+                    </select>
+                    <ArrowUpDown className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+                  </div>
                 </div>
               </div>
-            ) : loading ? (
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8">
-                {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
-                  <div key={i} className="animate-pulse bg-gray-100 dark:bg-gray-800 aspect-[4/5] rounded-2xl" />
+
+              {/* Quick sorting tabs */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-4 mb-4 no-scrollbar text-xs font-semibold">
+                {[
+                  { id: 'popular', label: 'Популярні' },
+                  { id: 'price_asc', label: 'Від дешевих' },
+                  { id: 'price_desc', label: 'Від дорогих' },
+                  { id: 'newest', label: 'Новинки' }
+                ].map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setSortBy(s.id as any)}
+                    className={`inline-flex items-center px-3 py-1.5 rounded-lg transition-all whitespace-nowrap text-xs cursor-pointer ${
+                      sortBy === s.id
+                        ? 'bg-blue-600 text-white font-bold shadow-2xs'
+                        : 'bg-slate-100 dark:bg-zinc-800/80 text-slate-700 dark:text-zinc-300 hover:bg-slate-200 dark:hover:bg-zinc-800'
+                    }`}
+                  >
+                    <span>{s.label}</span>
+                  </button>
                 ))}
               </div>
-            ) : (
-              <>
-                <motion.div 
-                  variants={containerVariants}
-                  initial="hidden"
-                  animate="visible"
-                  className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-8"
-                >
-                  {products.map(product => (
-                    <motion.div key={product.id} variants={itemVariants} className="h-full">
-                      <ProductCard product={product} />
+
+              <div className="w-full">
+                {fetchError ? (
+                  <div className="bg-red-50 dark:bg-red-900/10 border border-red-100 dark:border-red-900/30 p-12 rounded-[40px] text-center max-w-2xl mx-auto">
+                    <AlertTriangle className="w-16 h-16 text-red-500 mx-auto mb-6" />
+                    <h3 className="text-2xl font-black text-red-900 dark:text-red-400 mb-2">Помилка з'єднання</h3>
+                    <p className="text-red-700/60 dark:text-red-400/60 font-medium mb-6 font-mono text-xs">{fetchError}</p>
+                    <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+                      <button 
+                        onClick={() => fetchProducts(0, true)}
+                        className="bg-red-600 text-white px-8 py-3 rounded-2xl font-bold hover:bg-red-700 transition-all shadow-lg shadow-red-200"
+                      >
+                        Спробувати ще раз
+                      </button>
+                      {isAdmin && (
+                        <Link to="/admin?tab=diagnostics" className="text-red-600 font-bold hover:underline">
+                          Діагностика →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                ) : loading ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3 md:gap-5">
+                    {[1, 2, 3, 4, 5, 6, 7, 8].map(i => (
+                      <div key={i} className="animate-pulse bg-gray-100 dark:bg-gray-800 aspect-[4/5] rounded-2xl" />
+                    ))}
+                  </div>
+                ) : (
+                  <>
+                    <motion.div 
+                      variants={containerVariants}
+                      initial="hidden"
+                      animate="visible"
+                      className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-3 sm:gap-4 md:gap-5"
+                    >
+                      {products.map(product => (
+                        <motion.div key={product.id} variants={itemVariants} className="h-full">
+                          <ProductCard product={product} />
+                        </motion.div>
+                      ))}
                     </motion.div>
-                  ))}
-                </motion.div>
                 
                 {hasMore && (
                   <div className="mt-16 flex justify-center">
@@ -494,7 +504,9 @@ export const HomePage: React.FC = () => {
             )}
           </div>
         </div>
-      </section>
+      </div>
+    </div>
+  </section>
 
       <section className="py-24 bg-gray-50 dark:bg-gray-900/50 transition-colors">
         <div className="container mx-auto px-4">
